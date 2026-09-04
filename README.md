@@ -42,18 +42,23 @@ the same shape worked verbatim for an NTFS prototype before it.
 For a new consumer:
 
 ```sh
-# 1. Vendor the harness as a submodule (or path-dep) at <consumer>/harness/.
-git submodule add https://github.com/antimatter-studios/fs-test-harness.git harness
+# 1. Check the harness out AS A SIBLING of your repo, not inside it.
+#    Consumers pin the ref in chores.yml and let `chore siblings` do
+#    this, so every repo on the machine shares one copy rather than
+#    each carrying its own -- which is how they used to end up on
+#    different versions with nothing reporting it.
+git clone https://github.com/antimatter-studios/fs-test-harness.git ../fs-test-harness
 
 # 2. Drop a harness.toml + test-matrix.json next to your Cargo.toml.
-cp harness/examples/minimal/harness.toml ./harness.toml
-cp harness/examples/minimal/test-matrix.json ./test-matrix.json
+cp ../fs-test-harness/examples/minimal/harness.toml ./harness.toml
+cp ../fs-test-harness/examples/minimal/test-matrix.json ./test-matrix.json
 $EDITOR harness.toml   # point [project.binary] at your driver, fill [vm.*]
 
 # 3. Run the matrix. On first run, prompts for VM details + writes
 #    .test-env; subsequent runs skip straight to the matrix. See
-#    `bash harness/scripts/run-tests.sh --help` for the full surface.
-bash harness/scripts/run-tests.sh
+#    `bash ../fs-test-harness/scripts/run-tests.sh --help` for the full
+#    surface.
+bash ../fs-test-harness/scripts/run-tests.sh
 ```
 
 Full contract: [`docs/consumer-integration.md`](./docs/consumer-integration.md).
