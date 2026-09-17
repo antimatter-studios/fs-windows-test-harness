@@ -1,0 +1,1 @@
+'scenarios' is a required property

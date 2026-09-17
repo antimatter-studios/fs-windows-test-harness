@@ -1,36 +1,38 @@
 name: CI
 
+# Pull requests (any base) and pushes to main. Branch protection requires
+# ONE check, `ci-ok`, which fails unless every other job succeeded -- so
+# adding, renaming or removing a job never touches repository settings.
 on:
-  push:
-    branches: ["**"]
   pull_request:
-    branches: ["**"]
+  push:
+    branches: [main]
 
-# Cancel in-progress runs of the same ref when a new commit arrives.
+# A new push to a PR supersedes the run in progress. Runs on main are
+# never cancelled, so every commit on main keeps a complete verdict.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 jobs:
   lint:
-    name: lint (shell + cargo + schemas)
+    name: lint (shell + cargo)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install shellcheck + jsonschema
+      - name: Install shellcheck
         run: |
           sudo apt-get update
-          sudo apt-get install -y shellcheck python3-pip
-          # Python 3.12+ on ubuntu-latest is PEP 668 managed; --user keeps
-          # the install out of the system site-packages without needing
-          # --break-system-packages.
-          python3 -m pip install --user --upgrade jsonschema
+          sudo apt-get install -y shellcheck
 
       - name: bash -n every shell script
         run: |
           set -e
-          for f in scripts/*.sh tests/*.sh; do
+          for f in scripts/*.sh tests/*.sh tests/smoke-consumer/*.sh; do
             echo "checking: $f"
             bash -n "$f"
           done
@@ -47,7 +49,7 @@ jobs:
 
       - name: shellcheck test scripts
         run: |
-          shellcheck --severity=error tests/*.sh
+          shellcheck --severity=error tests/*.sh tests/smoke-consumer/*.sh
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -55,56 +57,13 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            runner -> target
-            tests/mock-fs -> target
+          workspaces: runner -> target
 
       - name: cargo fmt --check
         run: cargo fmt --manifest-path runner/Cargo.toml --all -- --check
 
       - name: cargo clippy
         run: cargo clippy --manifest-path runner/Cargo.toml --all-targets -- -D warnings
-
-      - name: validate schemas parse and examples match
-        # Uses the Python API (not the deprecated `python -m jsonschema`
-        # CLI) so we keep working when that CLI is removed upstream.
-        run: |
-          python3 - <<'PY'
-          import json, sys
-          import jsonschema
-          from jsonschema import Draft202012Validator
-
-          schemas = {
-              "schemas/test-matrix.schema.json": "matrix",
-              "schemas/harness.schema.json":     "harness",
-          }
-          loaded = {}
-          for path in schemas:
-              with open(path) as f:
-                  s = json.load(f)
-              Draft202012Validator.check_schema(s)
-              loaded[path] = s
-              print(f"OK schema parses: {path}")
-
-          # Validate example + mock matrices against the matrix schema.
-          matrix_schema = loaded["schemas/test-matrix.schema.json"]
-          targets = [
-              "examples/minimal/test-matrix.json",
-              "tests/mock-fs/scenarios/test-matrix.json",
-          ]
-          for t in targets:
-              with open(t) as f:
-                  doc = json.load(f)
-              errors = sorted(
-                  Draft202012Validator(matrix_schema).iter_errors(doc),
-                  key=lambda e: list(e.absolute_path),
-              )
-              if errors:
-                  for e in errors:
-                      print(f"FAIL {t}: {'/'.join(map(str,e.absolute_path))}: {e.message}", file=sys.stderr)
-                  sys.exit(1)
-              print(f"OK {t} matches matrix schema")
-          PY
 
   runner-unit:
     name: runner unit tests
@@ -125,20 +84,39 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: bash -n
-        run: bash -n tests/state-machine.sh
-
       - name: run state-machine self-test
         run: bash tests/state-machine.sh
 
-  mock-scenario:
-    name: mock-scenario end-to-end (windows)
+  config:
+    name: config (schemas, examples, negative fixtures)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install jsonschema
+        # Python 3.12+ on ubuntu-latest is PEP 668 managed; --user keeps
+        # the install out of the system site-packages.
+        run: python3 -m pip install --user --upgrade jsonschema
+
+      - name: validate every consumer config; reject every invalid fixture
+        run: python3 tests/validate-configs.py
+
+  smoke:
+    name: smoke (windows-latest, WinFsp memfs, run-tests.sh over SSH)
+    # The real thing, end to end: scripts/run-tests.sh on this Windows
+    # runner orchestrates the smoke consumer against the same runner as
+    # its "VM" over SSH to localhost. Every VM step mounts a volume
+    # through WinFsp (memfs), so a green run means the harness really
+    # booted a filesystem, drove file ops on the drive letter, unmounted,
+    # and reported what happened -- including a canary it must report as
+    # failed. See tests/smoke-consumer/run-smoke.sh.
     runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      VM_WORKDIR: C:/fswth-vm/smoke-consumer
     defaults:
       run:
-        # PowerShell on windows-latest. The harness runner expects `powershell`
-        # to be on PATH; runner already has it.
-        shell: pwsh
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
@@ -146,67 +124,85 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            runner -> target
-            tests/mock-fs -> target
+          workspaces: runner -> target
+
+      - name: install WinFsp (the filesystem under test is its memfs)
+        shell: pwsh
+        run: |
+          choco install winfsp -y --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem "${env:ProgramFiles(x86)}\WinFsp\bin\memfs-*.exe" | Format-Table -AutoSize Name, Length
+
+      - name: make this runner its own Windows VM (sshd, key auth, PowerShell)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Key generated with Git's ssh-keygen: pwsh would hand
+          # `-N '""'` over as a literal two-character passphrase.
+          & "$env:ProgramFiles\Git\bin\bash.exe" -c 'mkdir -p ~/.ssh && ssh-keygen -t ed25519 -N "" -f ~/.ssh/fswth-smoke -q'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # runneradmin is an administrator, and sshd_config sends
+          # administrators to this file, which must be admin/SYSTEM-only.
+          $keys = "$env:ProgramData\ssh\administrators_authorized_keys"
+          Get-Content "$env:USERPROFILE\.ssh\fswth-smoke.pub" | Set-Content -Encoding ascii $keys
+          icacls $keys /inheritance:r /grant 'Administrators:F' /grant 'SYSTEM:F' | Out-Null
+          # The harness speaks PowerShell to the VM (ship phase, ops).
+          New-ItemProperty -Path HKLM:\SOFTWARE\OpenSSH -Name DefaultShell `
+            -Value "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
+            -PropertyType String -Force | Out-Null
+          Restart-Service sshd
+          Get-Service sshd | Format-Table -AutoSize
 
       - name: build run-matrix
         run: cargo build --manifest-path runner/Cargo.toml --release --bin run-matrix
 
-      - name: build mock-fs
-        run: cargo build --manifest-path tests/mock-fs/Cargo.toml --release --bin mock-fs
-
-      - name: run mock matrix end-to-end
-        env:
-          HARNESS_TOML: tests/mock-fs/scenarios/harness.toml
-          HARNESS_CONSUMER_ROOT: tests/mock-fs/scenarios
-          # Image-dir is resolved relative to the dispatcher's cwd at
-          # op time. Pin it explicit so {scenario.image} substitution
-          # finds the fixture mock.img next to harness.toml.
-          HARNESS_IMAGE_DIR: tests/mock-fs/scenarios
+      - name: smoke test (run-tests.sh -> ssh localhost -> WinFsp memfs)
         run: |
-          # Walks each scenario.recipe via the per-step dispatcher and
-          # writes per-scenario result.json + recipe.json under
-          # test-diagnostics/matrix/<scenario>/.
-          ./runner/target/release/run-matrix.exe --test-threads=1
-        # Don't bury a failure: surface non-zero as a pipeline failure.
-
-      - name: assert per-scenario results are passed
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $names = @('mock-list', 'mock-cat-roundtrip', 'v2-recipe-host-only')
-          foreach ($n in $names) {
-              $path = "tests/mock-fs/scenarios/test-diagnostics/matrix/$n/result.json"
-              if (-not (Test-Path -LiteralPath $path)) {
-                  throw "missing result: $path"
-              }
-              $m = Get-Content -Raw -LiteralPath $path | ConvertFrom-Json
-              if ("$($m.status)" -ne 'passed') {
-                  throw "scenario '$n' status='$($m.status)' (expected 'passed'). result: $path"
-              }
-              Write-Host "  ok: $n -> passed"
-          }
-          Write-Host "all mock scenarios status=passed"
+          # No .test-env and no terminal: run-tests.sh bootstraps from the
+          # flags, and its preflight trusts localhost's host key itself.
+          bash tests/smoke-consumer/run-smoke.sh \
+            --vm-host=runneradmin@localhost \
+            --ssh-key="$(cygpath -m ~/.ssh/fswth-smoke)" \
+            --vm-workdir="$VM_WORKDIR"
 
       - name: dump diagnostics on failure
         if: failure()
         run: |
-          # No artifact upload action allowed by the spec; spill the diag
-          # tree to the job log instead so failures are debuggable from
-          # the workflow run page alone.
-          $root = "tests/mock-fs/scenarios/test-diagnostics"
-          if (Test-Path -LiteralPath $root) {
-              Get-ChildItem -Recurse -Path $root |
-                  ForEach-Object {
-                      Write-Host "----- $($_.FullName) -----"
-                      if ($_.PSIsContainer) { return }
-                      try {
-                          Get-Content -Raw -LiteralPath $_.FullName -EA Stop |
-                              ForEach-Object { Write-Host $_ }
-                      } catch {
-                          Write-Host "(unreadable: $_)"
-                      }
-                  }
-          } else {
-              Write-Host "no diagnostics directory at $root"
+          dump() {
+            [ -d "$1" ] || { echo "(no $1)"; return; }
+            find "$1" -type f | sort | while read -r f; do
+              echo "----- $f -----"
+              head -c 20000 "$f"; echo
+            done
           }
+          dump tests/smoke-consumer/test-diagnostics
+          # memfs launcher logs live beside the images on the "VM".
+          dump "$(cygpath -u "$VM_WORKDIR")"
+
+  ci-ok:
+    # THE required check for branch protection / auto-merge. Fails if any
+    # job failed, was cancelled or was skipped, and if a job exists that
+    # this one does not wait for.
+    name: ci-ok
+    if: always()
+    needs: [lint, runner-unit, state-machine, config, smoke]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: every other job is listed in needs
+        run: |
+          jobs=$(yq -r '.jobs | keys | .[] | select(. != "ci-ok")' .github/workflows/ci.yml | sort)
+          needs=$(yq -r '.jobs["ci-ok"].needs[]' .github/workflows/ci.yml | sort)
+          if [ "$jobs" != "$needs" ]; then
+            echo "ci-ok.needs must list every job in ci.yml" >&2
+            diff <(echo "$jobs") <(echo "$needs") >&2 || true
+            exit 1
+          fi
+
+      - name: every needed job succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$NEEDS" | jq -e 'length > 0 and all(.[]; .result == "success")' > /dev/null

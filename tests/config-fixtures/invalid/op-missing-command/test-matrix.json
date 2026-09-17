@@ -1,0 +1,9 @@
+{
+  "scenarios": {
+    "list-root": {
+      "status": "pending",
+      "image": "empty.img",
+      "recipe": [ { "op": "ls", "path": "/" } ]
+    }
+  }
+}

@@ -30,6 +30,55 @@ To be released as **v4.0.0**: this is a breaking change.
   `vendor/fs-test-harness` submodule path. `HARNESS_DIR` in `.test-env`
   still overrides it.
 
+### Added
+
+- **Windows smoke test in CI.** A `smoke` job on `windows-latest`
+  installs WinFsp and runs the real `scripts/run-tests.sh` against the
+  runner itself over SSH to `localhost`, with WinFsp's sample `memfs`
+  as the filesystem driver (`tests/smoke-consumer`). It mounts,
+  writes, mkdirs, renames, unlinks, rmdirs, reads back with
+  content/size/sha256 checks, lists, ships the image back for the host
+  verifiers, and asserts the verdicts and diagnostics -- plus a canary
+  scenario that must be reported `failed`. Replaces the
+  `mock-scenario` job and the `tests/mock-fs` crate, which mounted
+  nothing.
+- **Config tests.** `tests/validate-configs.py` (CI job `config`)
+  validates every consumer config in the repo against the schemas and
+  checks recipes only use declared ops; negative fixtures under
+  `tests/config-fixtures/` must be rejected, by the schemas and (for
+  `invalid/`) by the runner's loader too.
+- **`ci-ok`**, one aggregate check that fails unless every other job
+  succeeded -- the single status check for branch protection and
+  auto-merge. CI now runs on pull requests and pushes to `main`, and a
+  newer push cancels a pull request's older run.
+- **`chores.yml`**: `chore check` (lint, test, state-machine, config)
+  and `chore smoke` (the smoke test against a Windows host) reproduce
+  CI locally.
+
+### Fixed
+
+- **Concurrent `claim-scenario.sh` could hand one scenario to two
+  agents, and concurrent status writes could be lost.** Writers read,
+  modified and renamed the matrix with no mutual exclusion; the
+  read-back check meant to detect a lost race was itself unserialised.
+  All three state-machine scripts now run their read-modify-write under
+  an exclusive `flock` (`scripts/_matrix_txn.py`). Showed up as
+  `tests/state-machine.sh` section [4] failing about one run in five;
+  measured 11/30 before (and a new lost-update test, [4b], 30/30),
+  0/100 after.
+- **The runner could not read the `.test-env` that `run-tests.sh`
+  writes.** Lines are written as `export VM_HOST="..."`; the runner
+  took `export VM_HOST` as the key and kept the quotes, so
+  `${VM_HOST}` / `${SSH_KEY}` / `${VM_WORKDIR}` in the config expanded
+  to nothing and every vm-step failed with "requires [vm].host". A
+  leading `export` and one pair of matching quotes are now stripped.
+- **`run-tests.sh` now ships the harness's `scripts/vm/` to
+  `{vm.harness_root}`**, as its `--help` already said it did. Before,
+  the VM ran whatever copy of the op scripts had last been put there by
+  hand, or failed when there was none.
+- The state-machine scripts no longer leave the matrix file mode
+  `0600` (a side effect of `mktemp`).
+
 ## [3.11.0] — 2026-06-02
 
 ### Added
