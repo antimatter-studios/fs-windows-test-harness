@@ -13,8 +13,8 @@
 #
 #   * mount:   start memfs on the drive, wait for the volume, extract
 #              the image into it, then print the ready line.
-#   * serving: poll the volume; whenever its tree changes, repack it
-#              into the image (written to a temp file, then swapped in
+#   * serving: poll the volume; whenever its tree changes, copy it out
+#              and repack it into the image (written to a temp file, then swapped in
 #              with a rename, so the image is never half-written).
 #
 # Invoke-WithMount unmounts by force-killing the process tree after a
@@ -109,10 +109,18 @@ function Write-SyncLog([string]$msg) {
 }
 
 function Save-Image {
-    # Build the new image beside the old one, then swap it in, so a kill
-    # at any instant leaves either the previous image or the new one.
+    # Copy the volume out to a staging dir on the system drive and pack
+    # that: bsdtar cannot walk a WinFsp drive root itself (it fails with
+    # "Couldn't visit directory" on the \\?\X:\ path). Build the new
+    # image beside the old one, then swap it in, so a kill at any instant
+    # leaves either the previous image or the new one.
+    $stage = "$Image.stage"
     $tmp = "$Image.saving"
-    $out = & $tar -cf $tmp -C $root . 2>&1
+    if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
+    New-Item -ItemType Directory -Path $stage | Out-Null
+    Get-ChildItem -LiteralPath $root -Force |
+        Copy-Item -Destination $stage -Recurse -Force
+    $out = & $tar -cf $tmp -C $stage . 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-SyncLog "tar -cf failed (exit $LASTEXITCODE): $out"
         return $false
