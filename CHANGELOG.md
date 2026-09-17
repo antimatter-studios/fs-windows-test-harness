@@ -1,7 +1,34 @@
 # Changelog
 
-All notable changes to fs-test-harness will land here. The format
+All notable changes to fs-windows-test-harness will land here. The format
 loosely follows Keep a Changelog; semver applies from `2.0.0` onward.
+
+## [Unreleased]
+
+### Changed
+
+- **Renamed from `fs-test-harness` to `fs-windows-test-harness`.** The
+  harness is filesystem-agnostic but Windows-specific (Mac orchestrator
+  → Windows VM over SSH, PowerShell executor, WinFsp drive-letter
+  mounts), and the name now says so. The repo is
+  `antimatter-studios/fs-windows-test-harness`; the runner crate is
+  `fs-windows-test-harness` (lib `fs_windows_test_harness`; the
+  `run-matrix` bin is unchanged). GitHub redirects the old URL, but
+  consumers should update clone URLs and rename their sibling checkout
+  folder to `../fs-windows-test-harness`.
+- **Consumer config is now `fs-windows-test-harness.toml`.** Both the
+  scripts and the runner still read `fs-test-harness.toml` when it is
+  the only one present, printing a one-line deprecation note to stderr;
+  if both exist the new name wins, and `HARNESS_TOML` still overrides
+  either. Rename the file whenever convenient.
+- **`[vm] scripts_dir` defaults to `scripts/fs-windows-test-harness`**,
+  falling back to `scripts/fs-test-harness` when only that directory
+  exists. Consumers that declare `scripts_dir` explicitly are unaffected.
+- **`{vm.harness_root}` defaults to the sibling checkout**
+  `{vm.workdir}/../fs-windows-test-harness` (or `../fs-test-harness`
+  when only that sibling exists) instead of the dead
+  `vendor/fs-test-harness` submodule path. `HARNESS_DIR` in `.test-env`
+  still overrides it.
 
 ## [3.11.0] — 2026-06-02
 

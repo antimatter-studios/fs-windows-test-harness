@@ -15,6 +15,42 @@
 use crate::local_config::LocalConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::path::Path;
+
+/// Consumer config filename, looked up in the consumer root.
+pub const CONFIG_FILE: &str = "fs-windows-test-harness.toml";
+/// Config filename from before the rename to fs-windows-test-harness.
+/// Still read when it is the only one present.
+pub const LEGACY_CONFIG_FILE: &str = "fs-test-harness.toml";
+
+/// Default `[vm] scripts_dir`, relative to the consumer root.
+pub const DEFAULT_SCRIPTS_DIR: &str = "scripts/fs-windows-test-harness";
+/// `[vm] scripts_dir` default from before the rename. Still used when
+/// it is the only one present.
+pub const LEGACY_SCRIPTS_DIR: &str = "scripts/fs-test-harness";
+
+/// Default harness checkout location relative to the consumer root
+/// (a sibling checkout), used for `{vm.harness_root}`.
+pub const DEFAULT_HARNESS_DIR: &str = "../fs-windows-test-harness";
+/// Sibling checkout name from before the rename. Still used when it
+/// is the only one present.
+pub const LEGACY_HARNESS_DIR: &str = "../fs-test-harness";
+
+/// Pick between a current name and its pre-rename legacy name under
+/// `base`. Returns `(name, used_legacy)`: the legacy name is chosen
+/// only when `base/current` does not exist and `base/legacy` does, so
+/// a consumer that has both (or neither) gets the current name.
+pub fn prefer_current_name(
+    base: &Path,
+    current: &'static str,
+    legacy: &'static str,
+) -> (&'static str, bool) {
+    if !base.join(current).exists() && base.join(legacy).exists() {
+        (legacy, true)
+    } else {
+        (current, false)
+    }
+}
 
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
 pub struct HarnessConfig {
@@ -205,7 +241,10 @@ pub struct VmSection {
     #[serde(default)]
     pub env_prefix: Option<String>,
     /// Consumer-side PowerShell scripts directory to ship to the VM.
-    /// Relative to the consumer's repo root. Default: `"scripts/fs-test-harness"`.
+    /// Relative to the consumer's repo root. Default:
+    /// `"scripts/fs-windows-test-harness"`, or the pre-rename
+    /// `"scripts/fs-test-harness"` when only that one exists (see
+    /// [`VmSection::scripts_dir_or_default`]).
     /// Read by `run-tests.sh` to determine which directory to ship.
     /// Declare this in `[vm]` whenever the scripts dir changes names.
     #[serde(default)]
@@ -213,6 +252,18 @@ pub struct VmSection {
 }
 
 impl VmSection {
+    /// The declared `scripts_dir`, or the default resolved against
+    /// `consumer_root` with the pre-rename fallback. Mirrors the
+    /// resolution in `scripts/run-tests.sh`.
+    pub fn scripts_dir_or_default(&self, consumer_root: &Path) -> String {
+        match self.scripts_dir.as_deref().filter(|s| !s.is_empty()) {
+            Some(d) => d.to_string(),
+            None => prefer_current_name(consumer_root, DEFAULT_SCRIPTS_DIR, LEGACY_SCRIPTS_DIR)
+                .0
+                .to_string(),
+        }
+    }
+
     /// Expand `${VAR}` / `${VAR:-default}` references in all string fields
     /// using values from `.test-env` via `LocalConfig`.
     pub fn apply(&mut self, lc: &LocalConfig) {

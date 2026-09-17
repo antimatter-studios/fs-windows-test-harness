@@ -3,11 +3,11 @@
 //! Kept in a single module so the harness builds the whole tree before
 //! running anything; covers the load-bearing paths the CI
 //! `runner-unit` job relies on:
-//!   1. `Harness::load` round-trips `examples/minimal/fs-test-harness.toml`.
+//!   1. `Harness::load` round-trips `examples/minimal/fs-windows-test-harness.toml`.
 //!   2. `Matrix` deserialises a recipe with mixed host/vm steps.
 //!   3. Consumer-defined scenario fields round-trip through serde so
 //!      `{scenario.<dotted.path>}` substitution can reach them.
-//!   4. `fs-test-harness.toml [ops]` accepts both the bare-string shorthand
+//!   4. `fs-windows-test-harness.toml [ops]` accepts both the bare-string shorthand
 //!      (sugar for `command = ..., host = "vm"`) and the full table
 //!      form with `host`, `when`, `expect_exit`.
 //!
@@ -17,7 +17,7 @@
 use crate::{Harness, Matrix};
 use std::path::PathBuf;
 
-/// Locate `examples/minimal/fs-test-harness.toml` relative to this crate.
+/// Locate `examples/minimal/fs-windows-test-harness.toml` relative to this crate.
 /// `CARGO_MANIFEST_DIR` is `runner/`, so the example lives one level up.
 fn minimal_harness_toml() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -25,7 +25,7 @@ fn minimal_harness_toml() -> PathBuf {
         .expect("runner has a parent dir")
         .join("examples")
         .join("minimal")
-        .join("fs-test-harness.toml")
+        .join("fs-windows-test-harness.toml")
 }
 
 #[test]
@@ -33,10 +33,10 @@ fn harness_load_round_trips_minimal_example() {
     let path = minimal_harness_toml();
     assert!(
         path.is_file(),
-        "expected example fs-test-harness.toml at {}",
+        "expected example fs-windows-test-harness.toml at {}",
         path.display()
     );
-    let harness = Harness::load(&path).expect("load minimal fs-test-harness.toml");
+    let harness = Harness::load(&path).expect("load minimal fs-windows-test-harness.toml");
 
     // Project section round-trips.
     assert_eq!(harness.config.project.name, "minimal-example");
@@ -182,4 +182,70 @@ command = "{binary} write-fixtures {scenario.image}"
         .expect("write-fixtures present");
     assert_eq!(wf.host, OpHost::Host);
     assert_eq!(wf.when.as_deref(), Some("scenario.fixtures"));
+}
+
+/// Fresh empty directory under the system temp dir.
+fn scratch_dir(tag: &str) -> PathBuf {
+    let p = std::env::temp_dir().join(format!(
+        "fs-windows-test-harness-{tag}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&p).unwrap();
+    p
+}
+
+#[test]
+fn config_file_prefers_current_name_and_falls_back_to_legacy() {
+    use crate::config::{prefer_current_name, CONFIG_FILE, LEGACY_CONFIG_FILE};
+    let dir = scratch_dir("config-fallback");
+
+    // Neither present: the current name (so the load error names it).
+    assert_eq!(
+        prefer_current_name(&dir, CONFIG_FILE, LEGACY_CONFIG_FILE),
+        (CONFIG_FILE, false)
+    );
+
+    // Only the legacy file: fall back to it.
+    std::fs::write(dir.join(LEGACY_CONFIG_FILE), "").unwrap();
+    assert_eq!(
+        prefer_current_name(&dir, CONFIG_FILE, LEGACY_CONFIG_FILE),
+        (LEGACY_CONFIG_FILE, true)
+    );
+
+    // Both: the current file wins.
+    std::fs::write(dir.join(CONFIG_FILE), "").unwrap();
+    assert_eq!(
+        prefer_current_name(&dir, CONFIG_FILE, LEGACY_CONFIG_FILE),
+        (CONFIG_FILE, false)
+    );
+
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn scripts_dir_default_falls_back_to_legacy_dir() {
+    use crate::config::{VmSection, DEFAULT_SCRIPTS_DIR, LEGACY_SCRIPTS_DIR};
+    let dir = scratch_dir("scripts-dir-fallback");
+    let vm = VmSection::default();
+
+    assert_eq!(vm.scripts_dir_or_default(&dir), DEFAULT_SCRIPTS_DIR);
+
+    std::fs::create_dir_all(dir.join(LEGACY_SCRIPTS_DIR)).unwrap();
+    assert_eq!(vm.scripts_dir_or_default(&dir), LEGACY_SCRIPTS_DIR);
+
+    std::fs::create_dir_all(dir.join(DEFAULT_SCRIPTS_DIR)).unwrap();
+    assert_eq!(vm.scripts_dir_or_default(&dir), DEFAULT_SCRIPTS_DIR);
+
+    // An explicit scripts_dir is used verbatim.
+    let declared = VmSection {
+        scripts_dir: Some("ps".to_string()),
+        ..VmSection::default()
+    };
+    assert_eq!(declared.scripts_dir_or_default(&dir), "ps");
+
+    std::fs::remove_dir_all(&dir).unwrap();
 }

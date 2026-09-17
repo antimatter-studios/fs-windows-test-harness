@@ -1,4 +1,4 @@
-//! fs-test-harness runner library.
+//! fs-windows-test-harness runner library.
 //!
 //! Public API:
 //! - [`Harness`]: loaded `harness.toml` + matrix.json.

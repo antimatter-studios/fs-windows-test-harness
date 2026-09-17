@@ -1,4 +1,4 @@
-# setup-windows-vm.ps1 -- provision a Windows VM as a fs-test-harness target.
+# setup-windows-vm.ps1 -- provision a Windows VM as a fs-windows-test-harness target.
 #
 # Two modes:
 #   * default   -- install (force-overwrite). Works on a fresh VM. May

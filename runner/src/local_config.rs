@@ -20,8 +20,10 @@ use std::path::Path;
 #[derive(Debug, Clone, Default)]
 pub struct LocalConfig {
     map: HashMap<String, String>,
-    /// Path where the harness is vendored; used to construct `{vm.harness_root}`.
-    /// Set via `HARNESS_DIR` in `.test-env`. Rarely needed outside non-standard layouts.
+    /// Harness checkout path relative to the consumer root; used to construct
+    /// `{vm.harness_root}`. Set via `HARNESS_DIR` in `.test-env`. Defaults to the
+    /// sibling checkout `../fs-windows-test-harness`, so this is rarely needed
+    /// outside non-standard layouts.
     pub harness_dir: Option<String>,
 }
 

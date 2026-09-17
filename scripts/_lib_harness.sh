@@ -2,9 +2,9 @@
 # _lib_harness.sh -- shared helpers for the harness scripts.
 #
 # Sourced by run-tests.sh and the state-machine helpers. Defines:
-#   harness_root            absolute path to this fs-test-harness checkout
+#   harness_root            absolute path to this fs-windows-test-harness checkout
 #   consumer_root           absolute path to the consumer repo (cwd by default)
-#   harness_toml            path to the consumer's harness.toml
+#   harness_toml            path to the consumer's fs-windows-test-harness.toml
 #   harness_get KEY         echoes the dotted-path value from harness.toml
 #   harness_get_or KEY DEF  same, with default
 #
@@ -16,7 +16,18 @@
 # shellcheck disable=SC2034   # variables are consumed by callers
 harness_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 consumer_root="${CONSUMER_ROOT:-${PWD}}"
-harness_toml="${HARNESS_TOML:-${consumer_root}/fs-test-harness.toml}"
+# Consumer config: HARNESS_TOML wins; otherwise fs-windows-test-harness.toml,
+# falling back to the pre-rename fs-test-harness.toml when it is the only
+# one present (runner/src/bin/run-matrix.rs resolves the same way).
+if [[ -n "${HARNESS_TOML:-}" ]]; then
+    harness_toml="${HARNESS_TOML}"
+elif [[ ! -e "${consumer_root}/fs-windows-test-harness.toml" \
+        && -e "${consumer_root}/fs-test-harness.toml" ]]; then
+    harness_toml="${consumer_root}/fs-test-harness.toml"
+    echo "[harness] note: fs-test-harness.toml is deprecated; rename it to fs-windows-test-harness.toml" >&2
+else
+    harness_toml="${consumer_root}/fs-windows-test-harness.toml"
+fi
 
 # harness_get <dotted.path>
 # Echoes the value (string / int / bool / json-array) at the given
@@ -97,7 +108,7 @@ harness_get_or() {
 }
 
 # harness_self_version
-# Echoes a one-line identity for *this* fs-test-harness checkout, derived
+# Echoes a one-line identity for *this* fs-windows-test-harness checkout, derived
 # from git in $harness_root. Format: "<describe> (<branch> @ <sha>)".
 # `<describe>` is `git describe --tags --always --dirty`, so a clean tag
 # shows as e.g. "v2.0.0", a few commits past as "v2.0.0-5-g2e4a610", and

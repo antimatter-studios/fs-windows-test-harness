@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.invalid/fs-test-harness/test-matrix.schema.json",
+  "$id": "https://github.com/antimatter-studios/fs-windows-test-harness/raw/main/schemas/test-matrix.schema.json",
   "title": "test-matrix.json",
-  "description": "Consumer scenario list for fs-test-harness. The runner reads `scenarios`; everything else is free-form metadata.",
+  "description": "Consumer scenario list for fs-windows-test-harness. The runner reads `scenarios`; everything else is free-form metadata.",
   "type": "object",
   "required": ["scenarios"],
   "properties": {
