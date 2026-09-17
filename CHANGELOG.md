@@ -5,7 +5,9 @@ loosely follows Keep a Changelog; semver applies from `2.0.0` onward.
 
 ## [Unreleased]
 
-### Changed
+To be released as **v4.0.0**: this is a breaking change.
+
+### Changed (BREAKING)
 
 - **Renamed from `fs-test-harness` to `fs-windows-test-harness`.** The
   harness is filesystem-agnostic but Windows-specific (Mac orchestrator
@@ -13,20 +15,18 @@ loosely follows Keep a Changelog; semver applies from `2.0.0` onward.
   mounts), and the name now says so. The repo is
   `antimatter-studios/fs-windows-test-harness`; the runner crate is
   `fs-windows-test-harness` (lib `fs_windows_test_harness`; the
-  `run-matrix` bin is unchanged). GitHub redirects the old URL, but
-  consumers should update clone URLs and rename their sibling checkout
-  folder to `../fs-windows-test-harness`.
-- **Consumer config is now `fs-windows-test-harness.toml`.** Both the
-  scripts and the runner still read `fs-test-harness.toml` when it is
-  the only one present, printing a one-line deprecation note to stderr;
-  if both exist the new name wins, and `HARNESS_TOML` still overrides
-  either. Rename the file whenever convenient.
-- **`[vm] scripts_dir` defaults to `scripts/fs-windows-test-harness`**,
-  falling back to `scripts/fs-test-harness` when only that directory
-  exists. Consumers that declare `scripts_dir` explicitly are unaffected.
+  `run-matrix` bin is unchanged).
+- **The old names are no longer read; there is no fallback.** Consumers
+  must rename in lockstep with bumping to this release:
+  - config file `fs-test-harness.toml` → `fs-windows-test-harness.toml`
+    (`HARNESS_TOML` still overrides the path);
+  - default `[vm] scripts_dir` `scripts/fs-test-harness` →
+    `scripts/fs-windows-test-harness` (or declare `scripts_dir`
+    explicitly);
+  - sibling checkout `../fs-test-harness` → `../fs-windows-test-harness`,
+    and clone URLs → `https://github.com/antimatter-studios/fs-windows-test-harness`.
 - **`{vm.harness_root}` defaults to the sibling checkout**
-  `{vm.workdir}/../fs-windows-test-harness` (or `../fs-test-harness`
-  when only that sibling exists) instead of the dead
+  `{vm.workdir}/../fs-windows-test-harness` instead of the dead
   `vendor/fs-test-harness` submodule path. `HARNESS_DIR` in `.test-env`
   still overrides it.
 

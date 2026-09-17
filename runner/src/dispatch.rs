@@ -500,18 +500,13 @@ fn build_flat_vocab(
     // * `{vm.harness_root}` — VM-side harness checkout; workdir joined with
     //                         the harness path relative to consumer root.
     //                         `HARNESS_DIR` in `.test-env` wins; otherwise
-    //                         the sibling checkout, falling back to the
-    //                         pre-rename sibling name if only it exists.
+    //                         the sibling checkout `../fs-windows-test-harness`.
     if let Some(workdir) = config.vm.workdir.as_deref().filter(|s| !s.is_empty()) {
         flat.insert("vm.workdir".to_string(), workdir.to_string());
-        let harness_dir = local_config.harness_dir.as_deref().unwrap_or_else(|| {
-            crate::config::prefer_current_name(
-                consumer_root,
-                crate::config::DEFAULT_HARNESS_DIR,
-                crate::config::LEGACY_HARNESS_DIR,
-            )
-            .0
-        });
+        let harness_dir = local_config
+            .harness_dir
+            .as_deref()
+            .unwrap_or(crate::config::DEFAULT_HARNESS_DIR);
         let vm_harness = format!(
             "{}/{}",
             workdir.trim_end_matches('/'),
@@ -848,10 +843,13 @@ mod tests {
     }
 
     #[test]
-    fn vm_harness_root_defaults_to_sibling_with_legacy_fallback() {
+    fn vm_harness_root_defaults_to_renamed_sibling_only() {
         let root = tempdir();
         let consumer = root.join("consumer");
         std::fs::create_dir_all(&consumer).unwrap();
+        // A sibling checkout under the pre-rename name must not be picked up.
+        std::fs::create_dir_all(root.join("fs-windows-test-harness".replace("windows-", "")))
+            .unwrap();
         let mut cfg = config_with_ops(&[]);
         cfg.vm.workdir = Some("C:/work/consumer/".into());
         let harness_root = |lc: &LocalConfig| {
@@ -860,22 +858,9 @@ mod tests {
                 .remove("vm.harness_root")
                 .unwrap()
         };
-        let lc = LocalConfig::default();
 
-        // No sibling checkout at all: the current name.
         assert_eq!(
-            harness_root(&lc),
-            "C:/work/consumer/../fs-windows-test-harness"
-        );
-
-        // Only the pre-rename sibling: fall back to it.
-        std::fs::create_dir_all(root.join("fs-test-harness")).unwrap();
-        assert_eq!(harness_root(&lc), "C:/work/consumer/../fs-test-harness");
-
-        // Both: the current name wins.
-        std::fs::create_dir_all(root.join("fs-windows-test-harness")).unwrap();
-        assert_eq!(
-            harness_root(&lc),
+            harness_root(&LocalConfig::default()),
             "C:/work/consumer/../fs-windows-test-harness"
         );
 

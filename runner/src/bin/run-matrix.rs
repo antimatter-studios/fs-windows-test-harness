@@ -8,7 +8,7 @@
 //! scenarios that fail every attempt are reported as permanently broken.
 //! Failure output includes the last failing step's stderr/stdout.
 
-use fs_windows_test_harness::config::{prefer_current_name, CONFIG_FILE, LEGACY_CONFIG_FILE};
+use fs_windows_test_harness::config::default_config_path;
 use fs_windows_test_harness::{Harness, MaxParallel, VmSection};
 use libtest_mimic::{Arguments, Failed, Trial};
 use serde::{Deserialize, Serialize};
@@ -96,20 +96,9 @@ fn main() {
     let consumer_root = std::env::var("HARNESS_CONSUMER_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|_| std::env::current_dir().expect("cwd"));
-    // HARNESS_TOML wins; otherwise prefer the current filename and fall
-    // back to the pre-rename one when it is the only one present.
     let config_path = std::env::var("HARNESS_TOML")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            let (name, legacy) =
-                prefer_current_name(&consumer_root, CONFIG_FILE, LEGACY_CONFIG_FILE);
-            if legacy {
-                eprintln!(
-                    "runner: note: {LEGACY_CONFIG_FILE} is deprecated; rename it to {CONFIG_FILE}"
-                );
-            }
-            consumer_root.join(name)
-        });
+        .unwrap_or_else(|_| default_config_path(&consumer_root));
 
     let harness = Harness::load(&config_path).unwrap_or_else(|e| {
         panic!("load {}: {e}", config_path.display());

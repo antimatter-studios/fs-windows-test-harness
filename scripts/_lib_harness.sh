@@ -16,18 +16,9 @@
 # shellcheck disable=SC2034   # variables are consumed by callers
 harness_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 consumer_root="${CONSUMER_ROOT:-${PWD}}"
-# Consumer config: HARNESS_TOML wins; otherwise fs-windows-test-harness.toml,
-# falling back to the pre-rename fs-test-harness.toml when it is the only
-# one present (runner/src/bin/run-matrix.rs resolves the same way).
-if [[ -n "${HARNESS_TOML:-}" ]]; then
-    harness_toml="${HARNESS_TOML}"
-elif [[ ! -e "${consumer_root}/fs-windows-test-harness.toml" \
-        && -e "${consumer_root}/fs-test-harness.toml" ]]; then
-    harness_toml="${consumer_root}/fs-test-harness.toml"
-    echo "[harness] note: fs-test-harness.toml is deprecated; rename it to fs-windows-test-harness.toml" >&2
-else
-    harness_toml="${consumer_root}/fs-windows-test-harness.toml"
-fi
+# Consumer config: HARNESS_TOML wins; otherwise fs-windows-test-harness.toml
+# in the consumer root (runner/src/bin/run-matrix.rs resolves the same way).
+harness_toml="${HARNESS_TOML:-${consumer_root}/fs-windows-test-harness.toml}"
 
 # harness_get <dotted.path>
 # Echoes the value (string / int / bool / json-array) at the given

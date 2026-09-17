@@ -199,53 +199,36 @@ fn scratch_dir(tag: &str) -> PathBuf {
 }
 
 #[test]
-fn config_file_prefers_current_name_and_falls_back_to_legacy() {
-    use crate::config::{prefer_current_name, CONFIG_FILE, LEGACY_CONFIG_FILE};
-    let dir = scratch_dir("config-fallback");
+fn config_path_uses_only_the_renamed_file() {
+    use crate::config::{default_config_path, CONFIG_FILE};
+    let dir = scratch_dir("config-name");
+    assert_eq!(CONFIG_FILE, "fs-windows-test-harness.toml");
+    assert_eq!(default_config_path(&dir), dir.join(CONFIG_FILE));
 
-    // Neither present: the current name (so the load error names it).
-    assert_eq!(
-        prefer_current_name(&dir, CONFIG_FILE, LEGACY_CONFIG_FILE),
-        (CONFIG_FILE, false)
-    );
-
-    // Only the legacy file: fall back to it.
-    std::fs::write(dir.join(LEGACY_CONFIG_FILE), "").unwrap();
-    assert_eq!(
-        prefer_current_name(&dir, CONFIG_FILE, LEGACY_CONFIG_FILE),
-        (LEGACY_CONFIG_FILE, true)
-    );
-
-    // Both: the current file wins.
-    std::fs::write(dir.join(CONFIG_FILE), "").unwrap();
-    assert_eq!(
-        prefer_current_name(&dir, CONFIG_FILE, LEGACY_CONFIG_FILE),
-        (CONFIG_FILE, false)
-    );
+    // A config under the pre-rename filename is not picked up.
+    std::fs::write(
+        dir.join(CONFIG_FILE.replace("windows-", "")),
+        "[project]\nname = \"old\"\n",
+    )
+    .unwrap();
+    assert_eq!(default_config_path(&dir), dir.join(CONFIG_FILE));
+    assert!(Harness::load(default_config_path(&dir)).is_err());
 
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
-fn scripts_dir_default_falls_back_to_legacy_dir() {
-    use crate::config::{VmSection, DEFAULT_SCRIPTS_DIR, LEGACY_SCRIPTS_DIR};
-    let dir = scratch_dir("scripts-dir-fallback");
+fn scripts_dir_defaults_to_renamed_dir() {
+    use crate::config::VmSection;
     let vm = VmSection::default();
+    assert_eq!(
+        vm.scripts_dir_or_default(),
+        "scripts/fs-windows-test-harness"
+    );
 
-    assert_eq!(vm.scripts_dir_or_default(&dir), DEFAULT_SCRIPTS_DIR);
-
-    std::fs::create_dir_all(dir.join(LEGACY_SCRIPTS_DIR)).unwrap();
-    assert_eq!(vm.scripts_dir_or_default(&dir), LEGACY_SCRIPTS_DIR);
-
-    std::fs::create_dir_all(dir.join(DEFAULT_SCRIPTS_DIR)).unwrap();
-    assert_eq!(vm.scripts_dir_or_default(&dir), DEFAULT_SCRIPTS_DIR);
-
-    // An explicit scripts_dir is used verbatim.
     let declared = VmSection {
         scripts_dir: Some("ps".to_string()),
         ..VmSection::default()
     };
-    assert_eq!(declared.scripts_dir_or_default(&dir), "ps");
-
-    std::fs::remove_dir_all(&dir).unwrap();
+    assert_eq!(declared.scripts_dir_or_default(), "ps");
 }

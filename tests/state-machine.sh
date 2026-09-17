@@ -202,7 +202,7 @@ PY
 assert "no pending scenarios remain after 8 claimers" \
     "${NO_PENDING_LEFT}" "yes"
 
-# ---- 5. config filename: new name preferred, legacy name fallback ---
+# ---- 5. config filename: only the renamed file is used ---------------
 echo "[5] config filename resolution"
 CFG_ROOT="${WORK_DIR}/consumer"
 mkdir -p "${CFG_ROOT}"
@@ -211,17 +211,16 @@ resolved_toml() {
     ( unset HARNESS_TOML; [[ -n "${1:-}" ]] && export HARNESS_TOML="$1"
       export CONSUMER_ROOT="${CFG_ROOT}"
       # shellcheck source=scripts/_lib_harness.sh
-      source "${HARNESS_ROOT}/scripts/_lib_harness.sh" 2>/dev/null
+      source "${HARNESS_ROOT}/scripts/_lib_harness.sh"
       printf '%s' "${harness_toml}" )
 }
-assert "neither file: new name" \
-    "$(resolved_toml)" "${CFG_ROOT}/fs-windows-test-harness.toml"
-touch "${CFG_ROOT}/fs-test-harness.toml"
-assert "only legacy file: falls back to fs-test-harness.toml" \
-    "$(resolved_toml)" "${CFG_ROOT}/fs-test-harness.toml"
-touch "${CFG_ROOT}/fs-windows-test-harness.toml"
-assert "both files: new name wins" \
-    "$(resolved_toml)" "${CFG_ROOT}/fs-windows-test-harness.toml"
+NEW_TOML="fs-windows-test-harness.toml"
+assert "default is ${NEW_TOML}" \
+    "$(resolved_toml)" "${CFG_ROOT}/${NEW_TOML}"
+# A config under the pre-rename filename must not be picked up.
+touch "${CFG_ROOT}/${NEW_TOML/windows-/}"
+assert "pre-rename filename is ignored" \
+    "$(resolved_toml)" "${CFG_ROOT}/${NEW_TOML}"
 assert "HARNESS_TOML override wins" \
     "$(resolved_toml /elsewhere/custom.toml)" "/elsewhere/custom.toml"
 

@@ -509,16 +509,10 @@ PYEOF
         }
 
         # Consumer scripts directory (declared in fs-windows-test-harness.toml
-        # [vm].scripts_dir, default "scripts/fs-windows-test-harness", or the
-        # pre-rename "scripts/fs-test-harness" when only that exists -- same
+        # [vm].scripts_dir, default "scripts/fs-windows-test-harness" -- same
         # as VmSection::scripts_dir_or_default). Contains per-op PowerShell
         # helpers called by win-* ops.
-        SCRIPTS_DIR_DEFAULT="scripts/fs-windows-test-harness"
-        if [[ ! -e "${consumer_root}/${SCRIPTS_DIR_DEFAULT}" \
-                && -e "${consumer_root}/scripts/fs-test-harness" ]]; then
-            SCRIPTS_DIR_DEFAULT="scripts/fs-test-harness"
-        fi
-        SCRIPTS_DIR="$(harness_get_or vm.scripts_dir "${SCRIPTS_DIR_DEFAULT}")"
+        SCRIPTS_DIR="$(harness_get_or vm.scripts_dir "scripts/fs-windows-test-harness")"
         if [[ -d "${consumer_root}/${SCRIPTS_DIR}" ]]; then
             echo "[ship] consumer ${SCRIPTS_DIR}/"
             ship_dir "${consumer_root}/${SCRIPTS_DIR}" "${VM_WORKDIR}/${SCRIPTS_DIR}"
@@ -575,8 +569,7 @@ fi
 : "${HARNESS_IMAGE_DIR:=${VM_IMAGE_DIR:-$(harness_get_or run.image_dir "$(harness_get_or vm.image_dir '')")}}"
 export HARNESS_IMAGE_DIR
 export HARNESS_CONSUMER_ROOT="${consumer_root}"
-# Hand the runner the config this script already resolved, so the legacy
-# filename fallback (and its deprecation note) happens once.
+# Hand the runner the config this script already resolved.
 export HARNESS_TOML="${harness_toml}"
 
 cd "${consumer_root}"
