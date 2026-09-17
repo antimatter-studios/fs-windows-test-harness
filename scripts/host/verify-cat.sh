@@ -31,6 +31,16 @@
 
 set -euo pipefail
 
+# sha256 hex of a file. sha256sum (GNU coreutils: Linux, Git for Windows)
+# or shasum (macOS, perl) -- neither is everywhere.
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum < "$1" | awk '{print $1}'
+    else
+        shasum -a 256 < "$1" | awk '{print $1}'
+    fi
+}
+
 binary=""
 expect_size=""
 expect_sha256=""
@@ -79,7 +89,7 @@ if [[ -n "${expect_size}" ]]; then
     fi
 fi
 if [[ -n "${expect_sha256}" ]]; then
-    got_sha=$(shasum -a 256 < "${tmp}" | awk '{print $1}')
+    got_sha=$(sha256_of "${tmp}")
     if [[ "${got_sha}" != "${expect_sha256}" ]]; then
         echo "verify-cat: sha256 mismatch at ${path}: got=${got_sha} want=${expect_sha256}" >&2
         fail=1

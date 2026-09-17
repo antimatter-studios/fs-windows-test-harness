@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # update-scenario-status.sh -- atomically update a scenario's status.
 #
-# Generic, FS-agnostic. See claim-scenario.sh for atomicity notes.
+# Generic, FS-agnostic. Serialised with every other matrix mutation
+# under the lock in _matrix_txn.py; see claim-scenario.sh.
 #
 # Usage:
 #   bash <harness>/scripts/update-scenario-status.sh \
@@ -31,22 +32,5 @@ if [[ ! -f "${WORK_LIST}" ]]; then
     echo "missing work list: ${WORK_LIST}" >&2
     exit 2
 fi
-TMP="$(mktemp "${WORK_LIST}.tmp.XXXXXX")"
-
-python3 - "${WORK_LIST}" "${TMP}" "${SCENARIO}" "${NEW_STATUS}" "${EVIDENCE}" <<'PY'
-import json, sys
-src, dst, scenario, new_status, evidence = sys.argv[1:6]
-with open(src) as f:
-    data = json.load(f)
-if scenario not in data.get("scenarios", {}):
-    print(f"unknown scenario: {scenario}", file=sys.stderr)
-    sys.exit(2)
-data["scenarios"][scenario]["status"] = new_status
-if evidence:
-    data["scenarios"][scenario]["evidence_link"] = evidence
-with open(dst, "w") as f:
-    json.dump(data, f, indent=2, ensure_ascii=False)
-PY
-
-mv "${TMP}" "${WORK_LIST}"
-echo "${SCENARIO} -> ${NEW_STATUS}"
+exec python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_matrix_txn.py" \
+    status "${WORK_LIST}" "${SCENARIO}" "${NEW_STATUS}" "${EVIDENCE}"

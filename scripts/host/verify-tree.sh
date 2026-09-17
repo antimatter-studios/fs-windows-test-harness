@@ -19,6 +19,16 @@
 
 set -euo pipefail
 
+# sha256 hex of a file. sha256sum (GNU coreutils: Linux, Git for Windows)
+# or shasum (macOS, perl) -- neither is everywhere.
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum < "$1" | awk '{print $1}'
+    else
+        shasum -a 256 < "$1" | awk '{print $1}'
+    fi
+}
+
 binary=""
 expect_sha256=""
 positional=()
@@ -51,7 +61,7 @@ trap 'rm -f "${tmp}"' EXIT
 "${binary}" tree "${image}" ${extra[@]+"${extra[@]}"} > "${tmp}"
 
 if [[ -n "${expect_sha256}" ]]; then
-    got=$(shasum -a 256 < "${tmp}" | awk '{print $1}')
+    got=$(sha256_of "${tmp}")
     if [[ "${got}" != "${expect_sha256}" ]]; then
         echo "verify-tree: stdout sha256 mismatch:" >&2
         echo "  got:  ${got}" >&2

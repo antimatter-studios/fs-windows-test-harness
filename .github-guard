@@ -1,0 +1,6 @@
+# .github-guard — declarations github-guard reads from the default branch on GitHub.
+[checks]
+	# ci-ok is the always-run gate: it fails when any job it needs failed,
+	# was cancelled or was skipped. Requiring the gate rather than each job
+	# means jobs can be renamed or split without stranding a merge.
+	required = ci-ok

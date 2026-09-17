@@ -1,0 +1,104 @@
+# tests/smoke-consumer/fs-windows-test-harness.toml -- the harness's own
+# end-to-end smoke test, written as an ordinary consumer.
+#
+# The "filesystem driver" is WinFsp's sample memfs, a real user-mode
+# WinFsp filesystem that ships with every WinFsp install. Volumes are
+# tar archives:
+#
+#   bin/tarimg.py                                  host side: create an
+#                                                  image, list it, read
+#                                                  a file back out
+#   scripts/fs-windows-test-harness/memfs-mount.ps1  VM side: mount an
+#                                                  image on a drive
+#                                                  letter via memfs
+#
+# Run it with tests/smoke-consumer/run-smoke.sh (CI: the `smoke` job,
+# which uses the Windows runner as its own VM over SSH to localhost;
+# locally: `chore smoke` against your Windows VM).
+#
+# Host-side ops run from this directory (run-tests.sh cds here), and
+# reach the harness's host verifiers at ../../scripts/host -- this
+# consumer lives inside the harness checkout.
+
+[project]
+name        = "fs-windows-test-harness-smoke"
+binary      = "bin/tarimg.py"
+matrix_path = "test-matrix.json"
+
+[vm]
+# Machine-local; run-tests.sh writes these to .test-env
+# (--vm-host / --ssh-key / --vm-workdir).
+host    = "${VM_HOST}"
+ssh_key = "${SSH_KEY}"
+workdir = "${VM_WORKDIR}"
+# Host-side staging dir for images. The runner claims
+# images/<run_id>/ per run and deletes each scenario's image after it.
+image_dir = "images"
+# For `run-tests.sh --reinstall` on a fresh VM.
+packages = [{ id = "WinFsp.WinFsp" }]
+
+# ── host side ───────────────────────────────────────────────────────
+# Commands run under cmd.exe on a Windows orchestrator and sh elsewhere.
+# Keep substituted values free of spaces and quotes: the runner passes
+# the command to `cmd.exe /C` as one argument, and Rust's argument
+# quoting escapes embedded quotes as \" -- which cmd.exe does not
+# understand -- so a quoted value with spaces is split on a Windows
+# orchestrator. Host-step volume paths are written without a leading
+# slash ("docs/final.txt", "." for the root): Git for Windows' bash
+# rewrites any argument starting with "/" into a Windows path
+# ("C:/Program Files/Git/...") when it calls a native program.
+
+[ops.image-create]
+host        = "host"
+command     = "python3 bin/tarimg.py create images/{run_id}/{scenario.image} {step.path}={step.content}"
+expect_exit = 0
+
+[ops.host-verify-ls]
+host        = "host"
+command     = "bash ../../scripts/host/verify-ls.sh --binary {binary} {step.expect} images/{run_id}/{scenario.image} {step.path}"
+expect_exit = 0
+
+[ops.host-verify-cat]
+host        = "host"
+command     = "bash ../../scripts/host/verify-cat.sh --binary {binary} {step.expect} images/{run_id}/{scenario.image} {step.path}"
+expect_exit = 0
+
+# ── VM side ─────────────────────────────────────────────────────────
+# The harness's generic op scripts, each of which mounts the image,
+# performs one operation on the drive and unmounts. The mount command
+# and ready line are all that is specific to this "driver".
+
+[ops.win-ls-via-mount]
+host        = "vm"
+command     = "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File '{vm.harness_root}/scripts/vm/win-ls-via-mount.ps1' -BinaryCmd 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {vm.workdir}/scripts/fs-windows-test-harness/memfs-mount.ps1 -Image {vm.workdir}/{scenario.image} -Drive {step.drive}' -ReadyLine 'memfs mounted at' -Drive '{step.drive}' -Path '{step.path}' -ExpectNames '{step.expect_names_csv?}' -ExpectCount '{step.expect_count?}'"
+expect_exit = 0
+
+[ops.win-cat-via-mount]
+host        = "vm"
+command     = "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File '{vm.harness_root}/scripts/vm/win-cat-via-mount.ps1' -BinaryCmd 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {vm.workdir}/scripts/fs-windows-test-harness/memfs-mount.ps1 -Image {vm.workdir}/{scenario.image} -Drive {step.drive}' -ReadyLine 'memfs mounted at' -Drive '{step.drive}' -Path '{step.path}' -ExpectContent '{step.expect_content?}' -ExpectSize '{step.expect_size?}' -ExpectSha256 '{step.expect_sha256?}'"
+expect_exit = 0
+
+[ops.win-write]
+host        = "vm"
+command     = "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File '{vm.harness_root}/scripts/vm/win-write.ps1' -BinaryCmd 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {vm.workdir}/scripts/fs-windows-test-harness/memfs-mount.ps1 -Image {vm.workdir}/{scenario.image} -Drive {step.drive}' -ReadyLine 'memfs mounted at' -Drive '{step.drive}' -Path '{step.path}' -Content '{step.content?}'"
+expect_exit = 0
+
+[ops.win-mkdir]
+host        = "vm"
+command     = "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File '{vm.harness_root}/scripts/vm/win-mkdir.ps1' -BinaryCmd 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {vm.workdir}/scripts/fs-windows-test-harness/memfs-mount.ps1 -Image {vm.workdir}/{scenario.image} -Drive {step.drive}' -ReadyLine 'memfs mounted at' -Drive '{step.drive}' -Path '{step.path}'"
+expect_exit = 0
+
+[ops.win-rename]
+host        = "vm"
+command     = "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File '{vm.harness_root}/scripts/vm/win-rename.ps1' -BinaryCmd 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {vm.workdir}/scripts/fs-windows-test-harness/memfs-mount.ps1 -Image {vm.workdir}/{scenario.image} -Drive {step.drive}' -ReadyLine 'memfs mounted at' -Drive '{step.drive}' -From '{step.from}' -To '{step.to}'"
+expect_exit = 0
+
+[ops.win-unlink]
+host        = "vm"
+command     = "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File '{vm.harness_root}/scripts/vm/win-unlink.ps1' -BinaryCmd 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {vm.workdir}/scripts/fs-windows-test-harness/memfs-mount.ps1 -Image {vm.workdir}/{scenario.image} -Drive {step.drive}' -ReadyLine 'memfs mounted at' -Drive '{step.drive}' -Path '{step.path}'"
+expect_exit = 0
+
+[ops.win-rmdir]
+host        = "vm"
+command     = "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File '{vm.harness_root}/scripts/vm/win-rmdir.ps1' -BinaryCmd 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {vm.workdir}/scripts/fs-windows-test-harness/memfs-mount.ps1 -Image {vm.workdir}/{scenario.image} -Drive {step.drive}' -ReadyLine 'memfs mounted at' -Drive '{step.drive}' -Path '{step.path}'"
+expect_exit = 0

@@ -3,9 +3,9 @@
 # Pre-commit hook — runs the two fast checks CI enforces, so a push
 # doesn't fail on something we could have caught locally in <30s.
 #
-# This crate is laid out with the Rust runner under `runner/` (and a
-# mock-fs helper under `tests/mock-fs/`). CI only enforces fmt + clippy
-# on `runner/`, so the hook mirrors that scope via --manifest-path.
+# The Rust runner lives under `runner/`; the hook runs fmt + clippy
+# there via --manifest-path, as CI does. `chore check` runs every
+# Linux/macOS CI job locally.
 #
 # Enable once per clone:
 #   git config core.hooksPath .githooks

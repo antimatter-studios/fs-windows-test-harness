@@ -1,0 +1,7 @@
+# An op runs on "host" or "vm"; anything else is a typo the runner cannot dispatch.
+[project]
+name = "fixture"
+
+[ops.ls]
+host = "windows"
+command = "{binary} ls {scenario.image} {step.path}"

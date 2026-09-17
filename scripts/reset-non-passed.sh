@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # reset-non-passed.sh -- reset every non-`passed-*` scenario back to
-# `pending` so a new pass can re-claim them. Idempotent.
+# `pending` so a new pass can re-claim them. Idempotent. Serialised
+# with claims and status updates under the lock in _matrix_txn.py.
 #
 # Usage: bash <harness>/scripts/reset-non-passed.sh
 #
@@ -15,19 +16,5 @@ if [[ ! -f "${WORK_LIST}" ]]; then
     exit 2
 fi
 
-python3 - "${WORK_LIST}" <<'PY'
-import json, sys
-src = sys.argv[1]
-with open(src) as f:
-    d = json.load(f)
-moved = 0
-for name, e in d.get("scenarios", {}).items():
-    s = e.get("status", "")
-    if not s.startswith("passed-"):
-        e["status"] = "pending"
-        moved += 1
-with open(src, "w") as f:
-    json.dump(d, f, indent=2, ensure_ascii=False)
-    f.write("\n")
-print(f"reset {moved} scenarios to pending; {len(d['scenarios']) - moved} remain passed-*")
-PY
+exec python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_matrix_txn.py" \
+    reset "${WORK_LIST}"

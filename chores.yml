@@ -1,0 +1,84 @@
+version: "3"
+chore_min_version: 0.6.0
+
+# THE CONTRACT THIS FILE EXISTS TO OWN.
+#
+# Every CI job has a local equivalent here, and CI is the copy that runs
+# the same commands -- if the two ever differ, this is the copy that is
+# wrong. `chore check` is everything that runs on macOS/Linux;
+# `chore smoke` is the Windows end-to-end test, driven from here against
+# a Windows host exactly as CI drives it against its own runner.
+#
+# These tasks run from the harness checkout. They need bash, python3
+# (3.11+, for tomllib) and cargo; `config` also needs the `jsonschema`
+# package, `lint` needs shellcheck.
+
+tasks:
+  lint:
+    desc: Shell syntax + shellcheck, cargo fmt + clippy (CI job `lint`)
+    cmds:
+      - for f in scripts/*.sh scripts/host/*.sh tests/*.sh tests/smoke-consumer/*.sh; do bash -n "$f"; done
+      - shellcheck -x --severity=error scripts/*.sh scripts/host/*.sh
+      - shellcheck --severity=error tests/*.sh tests/smoke-consumer/*.sh
+      - cargo fmt --manifest-path runner/Cargo.toml --all -- --check
+      - cargo clippy --manifest-path runner/Cargo.toml --all-targets -- -D warnings
+
+  test:
+    desc: Runner unit tests (CI job `runner-unit`)
+    cmds:
+      - cargo test --manifest-path runner/Cargo.toml --all-features --no-fail-fast
+
+  state-machine:
+    desc: claim / update-status / reset against a temp matrix, including concurrent writers (CI job `state-machine`)
+    cmds:
+      - bash tests/state-machine.sh
+
+  config:
+    desc: Every consumer config validates; every invalid fixture is rejected (CI job `config`)
+    cmds:
+      - python3 tests/validate-configs.py
+
+  check:
+    desc: Every CI job that runs off Windows -- lint, test, state-machine, config
+    # Sequential on purpose: the first failure stops the run and is the
+    # last thing on screen.
+    cmds:
+      - task: lint
+      - task: test
+      - task: state-machine
+      - task: config
+
+  smoke:
+    desc: End-to-end smoke test against a Windows host with WinFsp (CI job `smoke`)
+    # Runs tests/smoke-consumer through scripts/run-tests.sh: mounts tar
+    # images with WinFsp's memfs on the host, drives file ops through the
+    # harness's op scripts, and checks that smoke-* scenarios pass and
+    # the canary-* scenario is reported failed.
+    #
+    # The host needs sshd with PowerShell as its default shell and WinFsp
+    # installed (`bash scripts/run-tests.sh --reinstall` from
+    # tests/smoke-consumer installs it from [vm.packages]). Flags are
+    # remembered in tests/smoke-consumer/.test-env, so after the first run
+    # plain `chore smoke` is enough.
+    #
+    #   chore smoke --vm-host user@vm --ssh-key ~/.ssh/vm --vm-workdir C:/fswth/smoke-consumer
+    args:
+      - {name: vm_host, desc: "user@host of the Windows machine"}
+      - {name: ssh_key, desc: "private key that host accepts"}
+      - {name: vm_workdir, desc: "scratch dir on that host, e.g. C:/fswth/smoke-consumer"}
+    vars:
+      vm_host: ""
+      ssh_key: ""
+      vm_workdir: ""
+    # Handed over as environment rather than spliced into the command
+    # line, so a path with spaces or quotes arrives intact.
+    env:
+      SMOKE_VM_HOST: '{{.vm_host}}'
+      SMOKE_SSH_KEY: '{{.ssh_key}}'
+      SMOKE_VM_WORKDIR: '{{.vm_workdir}}'
+    cmds:
+      - >-
+        bash tests/smoke-consumer/run-smoke.sh
+        ${SMOKE_VM_HOST:+"--vm-host=$SMOKE_VM_HOST"}
+        ${SMOKE_SSH_KEY:+"--ssh-key=$SMOKE_SSH_KEY"}
+        ${SMOKE_VM_WORKDIR:+"--vm-workdir=$SMOKE_VM_WORKDIR"}

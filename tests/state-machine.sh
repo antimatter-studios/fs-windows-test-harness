@@ -202,6 +202,29 @@ PY
 assert "no pending scenarios remain after 8 claimers" \
     "${NO_PENDING_LEFT}" "yes"
 
+# ---- 4b. concurrent status updates: no lost writes ------------------
+# Twelve writers each set a DIFFERENT scenario. Nothing contends for the
+# same entry, so the only way one can go missing is a writer replacing
+# the file with a copy it read before another writer's rename -- the
+# lost update that made [4] flaky.
+echo "[4b] concurrent status updates (12 writers, 12 distinct scenarios)"
+write_fixture_matrix 12
+for i in 00 01 02 03 04 05 06 07 08 09 10 11; do
+    bash "${HARNESS_ROOT}/scripts/update-scenario-status.sh" \
+        "sc${i}" "passed-agent-u${i}" >/dev/null &
+done
+wait
+ALL_UPDATES_KEPT="$(python3 - "${MATRIX}" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    d = json.load(f)
+lost = [n for n, e in sorted(d["scenarios"].items())
+        if e.get("status") != "passed-agent-u" + n[2:]]
+print("yes" if not lost else "lost: " + ",".join(lost))
+PY
+)"
+assert "every concurrent update persisted" "${ALL_UPDATES_KEPT}" "yes"
+
 # ---- 5. config filename: only the renamed file is used ---------------
 echo "[5] config filename resolution"
 CFG_ROOT="${WORK_DIR}/consumer"

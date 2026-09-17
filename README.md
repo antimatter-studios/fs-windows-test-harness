@@ -34,8 +34,8 @@ the same shape worked verbatim for an NTFS prototype before it.
 | `schemas/` | JSON Schema for `harness.toml` and `test-matrix.json`. |
 | `docs/` | Long-form: consumer integration, architecture, triage, multi-agent protocol. |
 | `examples/minimal/` | Smallest viable consumer config. |
-| `tests/` | Self-test fixtures: state-machine bash test + a `mock-fs` Cargo crate that stands in for a real driver in CI. |
-| `.github/workflows/` | CI: lint, runner unit tests, state-machine integration, end-to-end mock-scenario on `windows-latest`. |
+| `tests/` | Self-tests: the state-machine test, config validation with negative fixtures (`config-fixtures/`), and `smoke-consumer/`, an end-to-end consumer that mounts volumes through WinFsp's memfs. |
+| `.github/workflows/` | CI: lint, runner unit tests, state-machine, config validation, the Windows smoke test, and the aggregate `ci-ok` check. See [CI and automated merging](#ci-and-automated-merging). |
 
 ## Quickstart
 
@@ -70,32 +70,75 @@ Substitution vocabulary + cross-driver naming convention: [`docs/vocabulary.md`]
 
 ## Self-test
 
-The CI pipeline reproduces locally — useful before pushing a change to
-the harness machinery itself. Each command is independent.
+Every CI job has a local equivalent in [`chores.yml`](./chores.yml)
+(run with [chore](https://github.com/antimatter-studios/chore)); CI runs
+the same commands.
 
 ```sh
-# Shell scripts: syntax + lint.
-bash -n scripts/*.sh tests/*.sh
-shellcheck -x scripts/*.sh
+chore check    # lint + test + state-machine + config: everything off Windows
+chore lint     # bash -n, shellcheck, cargo fmt --check, cargo clippy
+chore test     # runner unit tests
+chore state-machine
+chore config   # needs python3 3.11+ and `pip install jsonschema`
 
-# Runner: format, lint, unit tests.
-cargo fmt --manifest-path runner/Cargo.toml --all -- --check
-cargo clippy --manifest-path runner/Cargo.toml --all-targets -- -D warnings
-cargo test  --manifest-path runner/Cargo.toml --all-features --no-fail-fast
-
-# State machine: claim/update/reset against a temp-dir matrix.
-bash tests/state-machine.sh
-
-# End-to-end loop with a stand-in driver (Linux/macOS will compile it;
-# the actual mount path runs on windows-latest in CI).
-cargo build --manifest-path tests/mock-fs/Cargo.toml --release
+# End to end against a Windows host with WinFsp and sshd (PowerShell as
+# the default shell). Flags are remembered in tests/smoke-consumer/.test-env.
+chore smoke --vm-host user@vm --ssh-key ~/.ssh/vm --vm-workdir C:/fswth/smoke-consumer
 ```
 
-The end-to-end **mock-scenario** job in CI builds `mock-fs` (a tiny
-no-op CLI), points the harness at it via a fixture `harness.toml`, and
-asserts that two scenarios go from "claim" through mount-with-ready-line
-through ops through teardown to a `verdict: passed` manifest — without
-any real filesystem driver, WinFsp, or SSH'd VM.
+## CI and automated merging
+
+A green CI run is meant to be enough to merge on, with no human looking
+at it. Each job proves one thing:
+
+| Job | Proves |
+| --- | --- |
+| `lint (shell + cargo)` | Every shell script parses and passes shellcheck (errors); the runner is `rustfmt`-clean and `clippy -D warnings`-clean. |
+| `runner unit tests` | The runner's substitution, dispatch, config loading, `.test-env` parsing and disk hygiene behave, and its loader accepts every consumer config in the repo and rejects every fixture in `tests/config-fixtures/invalid/`. |
+| `state-machine integration test` | `claim` / `update-status` / `reset` transition statuses correctly, and concurrent claimers and writers neither double-claim nor lose updates. |
+| `config (schemas, examples, negative fixtures)` | Both schemas are valid; every consumer config (`examples/*`, `tests/smoke-consumer`) validates and only uses declared ops; every negative fixture is rejected for the reason its `expect.txt` names. |
+| `smoke (windows-latest, WinFsp memfs, run-tests.sh over SSH)` | The harness works end to end on real Windows. See below. |
+| `ci-ok` | Every job above succeeded (not failed, cancelled or skipped), and no job exists that `ci-ok` does not wait for. |
+
+**`ci-ok` is the single required status check** to configure in branch
+protection / auto-merge. Jobs can be added, renamed or removed without
+touching repository settings: `ci-ok` fails if its `needs:` list and the
+workflow's jobs drift apart. CI runs on every pull request and on pushes
+to `main`; a newer push to a pull request cancels the older run.
+
+### The smoke test
+
+The `smoke` job installs WinFsp on `windows-latest` and uses **WinFsp's
+sample `memfs` filesystem as a stand-in driver**. The runner is its own
+"VM": the job enables key-based SSH to `localhost` with PowerShell as the
+default shell, then runs the real `scripts/run-tests.sh` against
+[`tests/smoke-consumer`](./tests/smoke-consumer), an ordinary consumer
+whose volumes are tar images:
+
+1. **bootstrap and preflight** -- `.test-env` is written from flags, and
+   the SSH preflight trusts the new host key itself;
+2. **ship** -- harness and consumer VM scripts go to the VM workdir;
+3. **`smoke-rw-roundtrip`** -- the host creates an image and ships it to
+   the VM; each VM step mounts it through memfs on a drive letter
+   (ready-line matched), runs one of the harness's op scripts (list, read
+   with content/size/sha256 checks, mkdir, write, rename, unlink, rmdir)
+   and unmounts; later steps only see earlier changes if they survived
+   the unmount. The image is shipped back and the harness's host
+   verifiers (`scripts/host/verify-ls.sh`, `verify-cat.sh`) check it.
+   Every scenario must pass on its first attempt, with `result.json`,
+   `recipe.json`, `results.json`, `run-manifest.json` and each step's
+   `step.json` / `stdout.txt` / `stderr.txt` present, and each op's output
+   proving it acted on the drive;
+4. **`canary-wrong-content`** -- expected to fail: it reads a file back
+   with the wrong expected content. `run-tests.sh` must exit non-zero and
+   the harness must report `failed` at that step, with the verifier's
+   `content mismatch`. A harness that cannot go red proves nothing when
+   it is green.
+
+memfs keeps volumes in memory, so
+[`memfs-mount.ps1`](./tests/smoke-consumer/scripts/fs-windows-test-harness/memfs-mount.ps1)
+loads the tar image into the drive on mount and writes changes back to
+it while mounted -- the image I/O a real driver does itself.
 
 ## License
 

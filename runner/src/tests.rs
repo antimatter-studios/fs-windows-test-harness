@@ -232,3 +232,54 @@ fn scripts_dir_defaults_to_renamed_dir() {
     };
     assert_eq!(declared.scripts_dir_or_default(), "ps");
 }
+
+/// Repo root (`runner/` is one level down).
+fn repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("runner has a parent dir")
+        .to_path_buf()
+}
+
+#[test]
+fn every_consumer_config_in_the_repo_loads() {
+    // The same set tests/validate-configs.py checks against the schemas:
+    // what the schema accepts, the runner must be able to load.
+    let root = repo_root();
+    for dir in ["examples/minimal", "tests/smoke-consumer"] {
+        let path = root.join(dir).join(crate::config::CONFIG_FILE);
+        let harness =
+            Harness::load(&path).unwrap_or_else(|e| panic!("{} should load: {e}", path.display()));
+        assert!(
+            !harness.matrix.scenarios.is_empty(),
+            "{dir}: matrix has no scenarios"
+        );
+    }
+}
+
+#[test]
+fn invalid_config_fixtures_are_rejected_by_the_loader() {
+    // tests/config-fixtures/invalid/: each case is also rejected by the
+    // schemas (tests/validate-configs.py). The loader must agree, or a
+    // config the schema calls broken would still run.
+    let dir = repo_root().join("tests/config-fixtures/invalid");
+    let mut cases: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("read {}: {e}", dir.display()))
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.is_dir())
+        .collect();
+    cases.sort();
+    assert!(
+        cases.len() >= 2,
+        "expected negative fixtures in {}",
+        dir.display()
+    );
+    for case in cases {
+        let path = case.join(crate::config::CONFIG_FILE);
+        assert!(
+            Harness::load(&path).is_err(),
+            "{} loaded, but it is an invalid-config fixture",
+            case.display()
+        );
+    }
+}

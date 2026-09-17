@@ -508,6 +508,17 @@ PYEOF
             scp ${SSH_OPTS:-} "${src}" "${VM_HOST}:${dest}"
         }
 
+        # Harness scripts/vm/ -> the VM-side harness root the runner
+        # substitutes as {vm.harness_root}: VM workdir joined with
+        # HARNESS_DIR from .test-env, else the sibling checkout
+        # ../fs-windows-test-harness (runner/src/dispatch.rs
+        # build_flat_vocab resolves it the same way). Shipping it keeps
+        # the VM's op scripts at the orchestrator's harness version
+        # instead of whatever was last copied there by hand.
+        VM_HARNESS_ROOT="${VM_WORKDIR%/}/${HARNESS_DIR:-../fs-windows-test-harness}"
+        echo "[ship] harness scripts/vm/ -> ${VM_HARNESS_ROOT}/scripts/vm"
+        ship_dir "${harness_root}/scripts/vm" "${VM_HARNESS_ROOT}/scripts/vm"
+
         # Consumer scripts directory (declared in fs-windows-test-harness.toml
         # [vm].scripts_dir, default "scripts/fs-windows-test-harness" -- same
         # as VmSection::scripts_dir_or_default). Contains per-op PowerShell

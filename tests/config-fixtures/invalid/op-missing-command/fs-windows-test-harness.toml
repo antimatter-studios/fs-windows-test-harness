@@ -1,0 +1,7 @@
+# The table form of an op must carry its command.
+[project]
+name = "fixture"
+
+[ops.ls]
+host = "vm"
+expect_exit = 0

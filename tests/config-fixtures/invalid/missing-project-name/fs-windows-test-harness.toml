@@ -1,0 +1,6 @@
+# [project] must name the consumer.
+[project]
+matrix_path = "test-matrix.json"
+
+[ops]
+ls = "{binary} ls {scenario.image} {step.path}"
