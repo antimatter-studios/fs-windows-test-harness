@@ -32,7 +32,7 @@ jobs:
       - name: bash -n every shell script
         run: |
           set -e
-          for f in scripts/*.sh tests/*.sh tests/smoke-consumer/*.sh; do
+          for f in scripts/*.sh scripts/host/*.sh tests/*.sh tests/smoke-consumer/*.sh; do
             echo "checking: $f"
             bash -n "$f"
           done
@@ -45,7 +45,7 @@ jobs:
           # several intentional patterns (unquoted SSH_OPTS for word
           # splitting, dynamic-path source, transient loop counters)
           # that trip warnings without being bugs.
-          shellcheck -x --severity=error scripts/*.sh
+          shellcheck -x --severity=error scripts/*.sh scripts/host/*.sh
 
       - name: shellcheck test scripts
         run: |

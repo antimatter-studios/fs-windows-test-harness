@@ -76,6 +76,11 @@ To be released as **v4.0.0**: this is a breaking change.
   `{vm.harness_root}`**, as its `--help` already said it did. Before,
   the VM ran whatever copy of the op scripts had last been put there by
   hand, or failed when there was none.
+- **Host verifiers work without `shasum`.** `scripts/host/verify-*.sh`
+  use `sha256sum` when present and fall back to `shasum -a 256`; Git for
+  Windows ships only the former, so any `--expect-sha256` check failed
+  with "command not found" on a Windows orchestrator. `scripts/host/` is
+  now linted in CI.
 - The state-machine scripts no longer leave the matrix file mode
   `0600` (a side effect of `mktemp`).
 

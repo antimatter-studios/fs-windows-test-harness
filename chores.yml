@@ -17,8 +17,8 @@ tasks:
   lint:
     desc: Shell syntax + shellcheck, cargo fmt + clippy (CI job `lint`)
     cmds:
-      - for f in scripts/*.sh tests/*.sh tests/smoke-consumer/*.sh; do bash -n "$f"; done
-      - shellcheck -x --severity=error scripts/*.sh
+      - for f in scripts/*.sh scripts/host/*.sh tests/*.sh tests/smoke-consumer/*.sh; do bash -n "$f"; done
+      - shellcheck -x --severity=error scripts/*.sh scripts/host/*.sh
       - shellcheck --severity=error tests/*.sh tests/smoke-consumer/*.sh
       - cargo fmt --manifest-path runner/Cargo.toml --all -- --check
       - cargo clippy --manifest-path runner/Cargo.toml --all-targets -- -D warnings
