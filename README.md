@@ -1,11 +1,11 @@
-# fs-test-harness
+# fs-windows-test-harness
 
 > Reusable Mac-orchestrator + Windows-VM-agent test harness for filesystem driver projects.
 
-[![CI](https://github.com/antimatter-studios/fs-test-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/antimatter-studios/fs-test-harness/actions/workflows/ci.yml)
+[![CI](https://github.com/antimatter-studios/fs-windows-test-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/antimatter-studios/fs-windows-test-harness/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![Rust 1.79+](https://img.shields.io/badge/rust-1.79%2B-orange.svg)](https://www.rust-lang.org)
-[![Status: alpha](https://img.shields.io/badge/status-alpha%20(0.1.0)-yellow.svg)](./CHANGELOG.md)
+[![Changelog](https://img.shields.io/badge/changelog-CHANGELOG.md-blue.svg)](./CHANGELOG.md)
 
 ## What is this
 
@@ -47,18 +47,19 @@ For a new consumer:
 #    this, so every repo on the machine shares one copy rather than
 #    each carrying its own -- which is how they used to end up on
 #    different versions with nothing reporting it.
-git clone https://github.com/antimatter-studios/fs-test-harness.git ../fs-test-harness
+git clone https://github.com/antimatter-studios/fs-windows-test-harness.git ../fs-windows-test-harness
 
-# 2. Drop a harness.toml + test-matrix.json next to your Cargo.toml.
-cp ../fs-test-harness/examples/minimal/harness.toml ./harness.toml
-cp ../fs-test-harness/examples/minimal/test-matrix.json ./test-matrix.json
-$EDITOR harness.toml   # point [project.binary] at your driver, fill [vm.*]
+# 2. Drop a fs-windows-test-harness.toml + test-matrix.json next to
+#    your Cargo.toml.
+cp ../fs-windows-test-harness/examples/minimal/fs-windows-test-harness.toml ./fs-windows-test-harness.toml
+cp ../fs-windows-test-harness/examples/minimal/test-matrix.json ./test-matrix.json
+$EDITOR fs-windows-test-harness.toml   # point [project.binary] at your driver, fill [vm.*]
 
 # 3. Run the matrix. On first run, prompts for VM details + writes
 #    .test-env; subsequent runs skip straight to the matrix. See
-#    `bash ../fs-test-harness/scripts/run-tests.sh --help` for the full
+#    `bash ../fs-windows-test-harness/scripts/run-tests.sh --help` for the full
 #    surface.
-bash ../fs-test-harness/scripts/run-tests.sh
+bash ../fs-windows-test-harness/scripts/run-tests.sh
 ```
 
 Full contract: [`docs/consumer-integration.md`](./docs/consumer-integration.md).
@@ -115,6 +116,5 @@ shape was lifted into this repo and the FS-specific bits pushed into
 `harness.toml`. The harness itself doesn't know or care which
 filesystem it's testing.
 
-Version is `0.1.0` — extraction is complete and the harness backs
-`ext4-win-driver`'s migration in progress; expect minor breaking
-changes until `1.0`.
+Releases and breaking changes are recorded in
+[`CHANGELOG.md`](./CHANGELOG.md); semver applies from `2.0.0` onward.

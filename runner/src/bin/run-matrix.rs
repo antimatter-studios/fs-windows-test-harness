@@ -1,14 +1,15 @@
 //! run-matrix — libtest-mimic runner with multi-pass retry.
 //!
 //! Loads `harness.toml` and the matrix file; runs each scenario via
-//! [`fs_test_harness::run_recipe`]; writes per-scenario diag artefacts
+//! [`fs_windows_test_harness::run_recipe`]; writes per-scenario diag artefacts
 //! under `<consumer_root>/test-diagnostics/matrix/`.
 //!
 //! Any scenario that fails is retried up to MAX_RETRIES times. Only
 //! scenarios that fail every attempt are reported as permanently broken.
 //! Failure output includes the last failing step's stderr/stdout.
 
-use fs_test_harness::{Harness, MaxParallel, VmSection};
+use fs_windows_test_harness::config::default_config_path;
+use fs_windows_test_harness::{Harness, MaxParallel, VmSection};
 use libtest_mimic::{Arguments, Failed, Trial};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -97,7 +98,7 @@ fn main() {
         .unwrap_or_else(|_| std::env::current_dir().expect("cwd"));
     let config_path = std::env::var("HARNESS_TOML")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| consumer_root.join("fs-test-harness.toml"));
+        .unwrap_or_else(|_| default_config_path(&consumer_root));
 
     let harness = Harness::load(&config_path).unwrap_or_else(|e| {
         panic!("load {}: {e}", config_path.display());
@@ -232,7 +233,7 @@ fn main() {
     let run_start = std::time::Instant::now();
 
     // Store scenarios in Arc so Trial closures can reference them across passes.
-    let all_scenarios: Arc<HashMap<String, Arc<fs_test_harness::Scenario>>> = Arc::new(
+    let all_scenarios: Arc<HashMap<String, Arc<fs_windows_test_harness::Scenario>>> = Arc::new(
         runnable
             .into_iter()
             .map(|(n, s)| (n, Arc::new(s)))
@@ -330,7 +331,7 @@ fn main() {
                     let step_start_ref =
                         std::sync::Arc::new(std::sync::Mutex::new(std::time::Instant::now()));
                     let name_cb = name.clone();
-                    let outcome = fs_test_harness::run_recipe(
+                    let outcome = fs_windows_test_harness::run_recipe(
                         &name,
                         &scn,
                         &cfg,
@@ -477,7 +478,7 @@ fn matrix_diag_root(consumer_root: &Path) -> PathBuf {
 /// directory are appended (truncated to 4 KB each) so failures are self-contained
 /// in the libtest-mimic output without needing to open separate log files.
 fn outcome_status(
-    outcome: &Result<fs_test_harness::RecipeResult, String>,
+    outcome: &Result<fs_windows_test_harness::RecipeResult, String>,
     diag: &Path,
 ) -> (&'static str, Option<String>) {
     match outcome {
@@ -678,7 +679,7 @@ fn now_human_readable() -> String {
 /// Format a duration in seconds as `Xm Ys` or `Xs`.
 /// Return a short parenthetical detail for a step — image filename for
 /// ship ops, last path component of the command for others.
-fn step_detail(r: &fs_test_harness::StepResult) -> String {
+fn step_detail(r: &fs_windows_test_harness::StepResult) -> String {
     if r.command.is_empty() || r.skipped {
         return String::new();
     }

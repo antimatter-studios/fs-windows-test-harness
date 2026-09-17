@@ -1,4 +1,4 @@
-# examples/minimal/harness.toml — the smallest plausible consumer config.
+# examples/minimal/fs-windows-test-harness.toml — the smallest plausible consumer config.
 #
 # Replace the placeholders before pointing the harness at this directory.
 # The matrix in the same dir lists one scenario that exercises a fictional

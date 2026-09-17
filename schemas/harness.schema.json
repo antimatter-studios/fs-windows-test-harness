@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.invalid/fs-test-harness/harness.schema.json",
+  "$id": "https://github.com/antimatter-studios/fs-windows-test-harness/raw/main/schemas/harness.schema.json",
   "title": "harness.toml",
-  "description": "Per-consumer fs-test-harness configuration. Consumed by both the Mac-side scripts and the Rust runner.",
+  "description": "Per-consumer fs-windows-test-harness configuration. Consumed by both the Mac-side scripts and the Rust runner.",
   "type": "object",
   "required": ["project"],
   "properties": {

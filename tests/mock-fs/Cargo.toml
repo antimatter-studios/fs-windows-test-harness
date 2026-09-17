@@ -3,7 +3,7 @@ name = "mock-fs"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Stand-in CLI used by fs-test-harness's mock-scenario CI job. Not published; not a real filesystem."
+description = "Stand-in CLI used by fs-windows-test-harness's mock-scenario CI job. Not published; not a real filesystem."
 publish = false
 
 [[bin]]

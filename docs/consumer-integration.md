@@ -1,6 +1,6 @@
 # Consumer integration
 
-How a new project plugs into `fs-test-harness`. Read this end-to-end the
+How a new project plugs into `fs-windows-test-harness`. Read this end-to-end the
 first time; you can skim it on subsequent project setups.
 
 ## What you need before starting
@@ -19,7 +19,7 @@ submodule:
 
 ```sh
 cd your-project
-git submodule add ../fs-test-harness harness
+git submodule add ../fs-windows-test-harness harness
 ```
 
 (Or `git clone` it as a sibling and reference via path-dep — the
@@ -29,9 +29,9 @@ dep from a parent project.)
 You should now have a `harness/` directory in your project containing
 the scripts, runner crate, schemas, and docs.
 
-## 2. Write `harness.toml`
+## 2. Write `fs-windows-test-harness.toml`
 
-Create `harness.toml` at the *root of your project* (not inside
+Create `fs-windows-test-harness.toml` at the *root of your project* (not inside
 `harness/`). Minimum:
 
 ```toml
@@ -56,7 +56,7 @@ rw_extra   = "--rw"
 ```
 
 See [`../schemas/harness.schema.json`](../schemas/harness.schema.json)
-for the full surface, and `examples/minimal/harness.toml` for an
+for the full surface, and `examples/minimal/fs-windows-test-harness.toml` for an
 annotated minimal example.
 
 ### Reserved substitution tokens

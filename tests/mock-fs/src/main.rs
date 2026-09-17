@@ -1,4 +1,4 @@
-//! mock-fs -- stand-in CLI for fs-test-harness's mock-scenario CI job.
+//! mock-fs -- stand-in CLI for fs-windows-test-harness's mock-scenario CI job.
 //!
 //! Pretends to be a filesystem driver so the harness's full loop can be
 //! exercised end-to-end without needing WinFsp, a real disk image, or

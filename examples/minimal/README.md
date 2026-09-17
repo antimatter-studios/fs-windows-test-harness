@@ -1,8 +1,8 @@
 # minimal example
 
-Smallest plausible `fs-test-harness` consumer. Two files:
+Smallest plausible `fs-windows-test-harness` consumer. Two files:
 
-- `harness.toml` — adapter config.
+- `fs-windows-test-harness.toml` — adapter config.
 - `test-matrix.json` — one scenario.
 
 This example references a fictional `myfs.exe` driver that does not
@@ -22,7 +22,7 @@ cd runner && cargo build --release && cd ..
 #    + tar dance; the runner can be invoked directly to demonstrate
 #    the local control flow.
 ./runner/target/release/run-matrix \
-    --config examples/minimal/harness.toml \
+    --config examples/minimal/fs-windows-test-harness.toml \
     --filter minimal-list-root
 ```
 

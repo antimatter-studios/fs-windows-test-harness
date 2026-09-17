@@ -15,6 +15,24 @@
 use crate::local_config::LocalConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+/// Consumer config filename, looked up in the consumer root.
+pub const CONFIG_FILE: &str = "fs-windows-test-harness.toml";
+
+/// Default `[vm] scripts_dir`, relative to the consumer root.
+pub const DEFAULT_SCRIPTS_DIR: &str = "scripts/fs-windows-test-harness";
+
+/// Default harness checkout location relative to the consumer root
+/// (a sibling checkout), used for `{vm.harness_root}` when
+/// `HARNESS_DIR` is not set in `.test-env`.
+pub const DEFAULT_HARNESS_DIR: &str = "../fs-windows-test-harness";
+
+/// Default config path for a consumer: `<consumer_root>/fs-windows-test-harness.toml`.
+/// No other filename is consulted; `HARNESS_TOML` is the override.
+pub fn default_config_path(consumer_root: &Path) -> PathBuf {
+    consumer_root.join(CONFIG_FILE)
+}
 
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
 pub struct HarnessConfig {
@@ -205,7 +223,9 @@ pub struct VmSection {
     #[serde(default)]
     pub env_prefix: Option<String>,
     /// Consumer-side PowerShell scripts directory to ship to the VM.
-    /// Relative to the consumer's repo root. Default: `"scripts/fs-test-harness"`.
+    /// Relative to the consumer's repo root. Default:
+    /// `"scripts/fs-windows-test-harness"` (see
+    /// [`VmSection::scripts_dir_or_default`]).
     /// Read by `run-tests.sh` to determine which directory to ship.
     /// Declare this in `[vm]` whenever the scripts dir changes names.
     #[serde(default)]
@@ -213,6 +233,15 @@ pub struct VmSection {
 }
 
 impl VmSection {
+    /// The declared `scripts_dir`, or [`DEFAULT_SCRIPTS_DIR`]. Mirrors
+    /// the default in `scripts/run-tests.sh`.
+    pub fn scripts_dir_or_default(&self) -> &str {
+        self.scripts_dir
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(DEFAULT_SCRIPTS_DIR)
+    }
+
     /// Expand `${VAR}` / `${VAR:-default}` references in all string fields
     /// using values from `.test-env` via `LocalConfig`.
     pub fn apply(&mut self, lc: &LocalConfig) {
