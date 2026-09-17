@@ -224,6 +224,30 @@ assert "pre-rename filename is ignored" \
 assert "HARNESS_TOML override wins" \
     "$(resolved_toml /elsewhere/custom.toml)" "/elsewhere/custom.toml"
 
+# A relative HARNESS_TOML or CONSUMER_ROOT is resolved against the directory
+# the harness was invoked from, and exported ABSOLUTE: run-tests.sh cd's into
+# the consumer root before the Rust runner reads HARNESS_TOML, and a relative
+# path would name a different file there.
+INVOKE_DIR="${WORK_DIR}/invoke"
+mkdir -p "${INVOKE_DIR}/configs"
+resolved_from() { # resolved_from <var> <cwd> <HARNESS_TOML> <CONSUMER_ROOT>
+    ( cd "$2" || exit 1
+      unset HARNESS_TOML CONSUMER_ROOT
+      [[ -n "$3" ]] && export HARNESS_TOML="$3"
+      [[ -n "$4" ]] && export CONSUMER_ROOT="$4"
+      # shellcheck source=scripts/_lib_harness.sh
+      source "${HARNESS_ROOT}/scripts/_lib_harness.sh"
+      printf '%s' "${!1}" )
+}
+assert "relative HARNESS_TOML is made absolute against the invocation dir" \
+    "$(resolved_from harness_toml "${INVOKE_DIR}" configs/custom.toml "${CFG_ROOT}")" \
+    "${INVOKE_DIR}/configs/custom.toml"
+assert "relative CONSUMER_ROOT is made absolute against the invocation dir" \
+    "$(resolved_from consumer_root "${WORK_DIR}" "" consumer)" "${WORK_DIR}/consumer"
+assert "a Windows drive path is left as it is" \
+    "$(resolved_from harness_toml "${INVOKE_DIR}" 'C:/work/custom.toml' "${CFG_ROOT}")" \
+    "C:/work/custom.toml"
+
 echo "==============================================================="
 echo "  results: ${PASS} passed, ${FAIL} failed"
 echo "==============================================================="

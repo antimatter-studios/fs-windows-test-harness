@@ -15,10 +15,21 @@
 
 # shellcheck disable=SC2034   # variables are consumed by callers
 harness_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-consumer_root="${CONSUMER_ROOT:-${PWD}}"
+# Both paths are made ABSOLUTE here, against the directory the script was
+# invoked from. run-tests.sh later cd's into consumer_root and exports
+# HARNESS_TOML for the Rust runner, so a relative path would be read from one
+# directory by the shell and from another by the runner -- a different config,
+# or none. A Windows drive path (C:\... or C:/...) is already absolute.
+harness_abs_path() {
+    case "$1" in
+        /* | [A-Za-z]:[\\/]*) printf '%s' "$1" ;;
+        *) printf '%s/%s' "${PWD}" "$1" ;;
+    esac
+}
+consumer_root="$(harness_abs_path "${CONSUMER_ROOT:-${PWD}}")"
 # Consumer config: HARNESS_TOML wins; otherwise fs-windows-test-harness.toml
 # in the consumer root (runner/src/bin/run-matrix.rs resolves the same way).
-harness_toml="${HARNESS_TOML:-${consumer_root}/fs-windows-test-harness.toml}"
+harness_toml="$(harness_abs_path "${HARNESS_TOML:-${consumer_root}/fs-windows-test-harness.toml}")"
 
 # harness_get <dotted.path>
 # Echoes the value (string / int / bool / json-array) at the given
