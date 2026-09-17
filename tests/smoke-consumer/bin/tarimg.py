@@ -56,8 +56,10 @@ def ls(image, path):
     for e in entries:
         if e and e.startswith(prefix) and e != want:
             names.add(e[len(prefix):].split("/", 1)[0])
-    for n in sorted(names):
-        print(n)
+    # Bytes with "\n", not print(): on Windows text-mode stdout writes
+    # "\r\n", and the harness's bash verifiers would read "docs\r".
+    sys.stdout.buffer.write("".join(n + "\n" for n in sorted(names)).encode("utf-8"))
+    sys.stdout.buffer.flush()
 
 
 def cat(image, path):
