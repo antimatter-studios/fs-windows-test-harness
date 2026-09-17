@@ -38,12 +38,16 @@ image_dir = "images"
 packages = [{ id = "WinFsp.WinFsp" }]
 
 # ── host side ───────────────────────────────────────────────────────
-# Commands run under cmd.exe on a Windows orchestrator and sh elsewhere,
-# so they use only double quotes and forward slashes.
+# Commands run under cmd.exe on a Windows orchestrator and sh elsewhere.
+# Keep substituted values free of spaces and quotes: the runner passes
+# the command to `cmd.exe /C` as one argument, and Rust's argument
+# quoting escapes embedded quotes as \" -- which cmd.exe does not
+# understand -- so a quoted value with spaces is split on a Windows
+# orchestrator.
 
 [ops.image-create]
 host        = "host"
-command     = "python3 bin/tarimg.py create images/{run_id}/{scenario.image} \"{step.path}={step.content}\""
+command     = "python3 bin/tarimg.py create images/{run_id}/{scenario.image} {step.path}={step.content}"
 expect_exit = 0
 
 [ops.host-verify-ls]

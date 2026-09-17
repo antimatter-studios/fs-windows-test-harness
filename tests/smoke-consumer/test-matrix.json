@@ -6,10 +6,10 @@
       "_doc": "Host creates an image, ships it to the VM; every VM step remounts it and runs one built-in op (list, read with content/size/sha256 checks, mkdir, write, rename, unlink, rmdir); the image is shipped back and the host verifiers read the result out of it. Each change is only visible to a later step if it survived an unmount, so the final listings prove the whole chain.",
       "image": "smoke-rw.tar",
       "recipe": [
-        { "op": "image-create", "path": "/hello.txt", "content": "hello from the host" },
+        { "op": "image-create", "path": "/hello.txt", "content": "hello-from-the-host" },
         { "op": "ship-to-vm", "src": "images/{run_id}/{scenario.image}", "dest": "{vm.workdir}/{scenario.image}" },
         { "op": "win-ls-via-mount", "drive": "X", "path": "/", "expect_names_csv": ".,..,hello.txt", "expect_count": "3" },
-        { "op": "win-cat-via-mount", "drive": "X", "path": "/hello.txt", "expect_content": "hello from the host", "expect_size": "19", "expect_sha256": "0d7c0ab02bab7f556b0de496bccbb2c99daa7c8aa7be3af9797d3aa8e1a170d5" },
+        { "op": "win-cat-via-mount", "drive": "X", "path": "/hello.txt", "expect_content": "hello-from-the-host", "expect_size": "19", "expect_sha256": "4b446221383191e3c60c8c7de9fe13ffd1e7fd9bb2dcac11b3322b0ff1f17da6" },
         { "op": "win-mkdir", "drive": "X", "path": "/docs" },
         { "op": "win-write", "drive": "X", "path": "/docs/draft.txt", "content": "first draft" },
         { "op": "win-rename", "drive": "X", "from": "/docs/draft.txt", "to": "/docs/final.txt" },
@@ -30,7 +30,7 @@
       "_doc": "EXPECTED TO FAIL. Reads back a file with the wrong expected content. run-smoke.sh asserts the harness reports it failed at the read step with a content mismatch; if this ever passes, the harness has stopped detecting failures.",
       "image": "canary.tar",
       "recipe": [
-        { "op": "image-create", "path": "/hello.txt", "content": "hello from the host" },
+        { "op": "image-create", "path": "/hello.txt", "content": "hello-from-the-host" },
         { "op": "ship-to-vm", "src": "images/{run_id}/{scenario.image}", "dest": "{vm.workdir}/{scenario.image}" },
         { "op": "win-cat-via-mount", "drive": "Y", "path": "/hello.txt", "expect_content": "not what the host wrote" }
       ]

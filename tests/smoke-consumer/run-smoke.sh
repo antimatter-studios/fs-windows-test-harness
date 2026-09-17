@@ -49,12 +49,18 @@ run_phase() {
     echo "=== ${name}: run-tests.sh exited ${PHASE_RC} ==="
 }
 
+# Both phases always run, so one CI log shows both verdicts.
+status=0
 run_phase smoke smoke- "$@"
 python3 "${here}/assert_verdicts.py" pass "${PHASE_RC}" \
-    "${here}/test-matrix.json" smoke- "${out}/smoke" "${out}/smoke.log"
+    "${here}/test-matrix.json" smoke- "${out}/smoke" "${out}/smoke.log" || status=1
 
 run_phase canary canary- "$@"
 python3 "${here}/assert_verdicts.py" canary "${PHASE_RC}" \
-    "${here}/test-matrix.json" canary- "${out}/canary" "${out}/canary.log"
+    "${here}/test-matrix.json" canary- "${out}/canary" "${out}/canary.log" || status=1
 
+if [[ "${status}" -ne 0 ]]; then
+    echo "smoke test FAILED (see assertions above)" >&2
+    exit 1
+fi
 echo "smoke test OK: smoke-* passed first time, canary-* reported failed as designed"
