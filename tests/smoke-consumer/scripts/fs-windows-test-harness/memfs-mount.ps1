@@ -15,7 +15,7 @@
 #              the image into it, then print the ready line.
 #   * serving: poll the volume; whenever its tree changes, repack it
 #              into the image (written to a temp file, then swapped in
-#              with File.Replace, so the image is never half-written).
+#              with a rename, so the image is never half-written).
 #
 # Invoke-WithMount unmounts by force-killing the process tree after a
 # fixed quiesce window (2.5 s after the op returns). That window is the
@@ -84,10 +84,10 @@ while (-not (Test-Path -LiteralPath $root)) {
     Start-Sleep -Milliseconds 50
 }
 
-& $tar -xf $Image -C $root
+$out = & $tar -xf $Image -C $root 2>&1
 if ($LASTEXITCODE -ne 0) {
     Stop-Process -Id $proc.Id -Force -EA SilentlyContinue
-    Fail "could not load image $Image into ${Drive}: (tar exit $LASTEXITCODE)"
+    Fail "could not load image $Image into ${Drive}: (tar exit $LASTEXITCODE): $out"
 }
 
 function Get-TreeSignature {
@@ -103,15 +103,26 @@ function Get-TreeSignature {
     return ($lines -join "`n")
 }
 
+$syncLog = "$Image.sync.log"
+function Write-SyncLog([string]$msg) {
+    Add-Content -LiteralPath $syncLog -Value "$((Get-Date).ToString('HH:mm:ss.fff')) [pid $PID] $msg"
+}
+
 function Save-Image {
+    # Build the new image beside the old one, then swap it in, so a kill
+    # at any instant leaves either the previous image or the new one.
     $tmp = "$Image.saving"
-    & $tar -cf $tmp -C $root .
-    if ($LASTEXITCODE -ne 0) { return $false }
-    [System.IO.File]::Replace($tmp, $Image, $null)
+    $out = & $tar -cf $tmp -C $root . 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-SyncLog "tar -cf failed (exit $LASTEXITCODE): $out"
+        return $false
+    }
+    Move-Item -LiteralPath $tmp -Destination $Image -Force
     return $true
 }
 
 $saved = Get-TreeSignature
+Write-SyncLog "mounted ${Drive}: from $Image ($((($saved -split "`n") | Where-Object { $_ }).Count) entries)"
 [Console]::Out.WriteLine("memfs mounted at ${Drive}: (image $Image, memfs pid $($proc.Id))")
 [Console]::Out.Flush()
 
@@ -120,9 +131,13 @@ while ($true) {
     $sig = Get-TreeSignature
     if ($sig -ne $saved) {
         try {
-            if (Save-Image) { $saved = $sig }
+            if (Save-Image) {
+                $saved = $sig
+                Write-SyncLog "saved image ($((($sig -split "`n") | Where-Object { $_ }).Count) entries)"
+            }
         } catch {
             # A file still open for writing, typically. Retry next poll.
+            Write-SyncLog "save failed, retrying: $_"
         }
     }
     Start-Sleep -Milliseconds $SyncIntervalMs

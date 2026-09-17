@@ -32,7 +32,7 @@
       "recipe": [
         { "op": "image-create", "path": "/hello.txt", "content": "hello-from-the-host" },
         { "op": "ship-to-vm", "src": "images/{run_id}/{scenario.image}", "dest": "{vm.workdir}/{scenario.image}" },
-        { "op": "win-cat-via-mount", "drive": "Y", "path": "/hello.txt", "expect_content": "not what the host wrote" }
+        { "op": "win-cat-via-mount", "drive": "Y", "path": "/hello.txt", "expect_content": "not what the host wrote", "expect_size": "__none__", "expect_sha256": "__none__" }
       ]
     }
   }

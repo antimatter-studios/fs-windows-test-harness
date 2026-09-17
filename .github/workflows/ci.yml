@@ -176,8 +176,11 @@ jobs:
             done
           }
           dump tests/smoke-consumer/test-diagnostics
-          # memfs launcher logs live beside the images on the "VM".
-          dump "$(cygpath -u "$VM_WORKDIR")"
+          # On the "VM": memfs launcher sync logs beside the images, and
+          # Invoke-WithMount's capture of the last mount's output.
+          for f in "$(cygpath -u "$VM_WORKDIR")"/*.log ~/dev/ext4-work/last-mount-diag/*; do
+            [ -f "$f" ] && { echo "----- $f -----"; cat "$f"; echo; }
+          done
 
   ci-ok:
     # THE required check for branch protection / auto-merge. Fails if any
