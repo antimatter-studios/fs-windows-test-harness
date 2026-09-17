@@ -43,7 +43,10 @@ packages = [{ id = "WinFsp.WinFsp" }]
 # the command to `cmd.exe /C` as one argument, and Rust's argument
 # quoting escapes embedded quotes as \" -- which cmd.exe does not
 # understand -- so a quoted value with spaces is split on a Windows
-# orchestrator.
+# orchestrator. Host-step volume paths are written without a leading
+# slash ("docs/final.txt", "." for the root): Git for Windows' bash
+# rewrites any argument starting with "/" into a Windows path
+# ("C:/Program Files/Git/...") when it calls a native program.
 
 [ops.image-create]
 host        = "host"

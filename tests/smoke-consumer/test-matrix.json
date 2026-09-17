@@ -20,9 +20,9 @@
         { "op": "win-cat-via-mount", "drive": "X", "path": "/docs/final.txt", "expect_content": "first draft", "expect_size": "11", "expect_sha256": "b500263e8e0ccbe3979fa5b5d093ace4bfcb7c55fbd5d50cfd6d32726830efaf" },
         { "op": "win-ls-via-mount", "drive": "X", "path": "/", "expect_names_csv": ".,..,docs,hello.txt", "expect_count": "4" },
         { "op": "ship-to-host", "src": "{vm.workdir}/{scenario.image}", "dest": "images/{run_id}/{scenario.image}" },
-        { "op": "host-verify-ls", "path": "/", "expect": "--expect-name docs --expect-name hello.txt --expect-count 2" },
-        { "op": "host-verify-ls", "path": "/docs", "expect": "--expect-name final.txt --expect-count 1" },
-        { "op": "host-verify-cat", "path": "/docs/final.txt", "expect": "--expect-size 11 --expect-sha256 b500263e8e0ccbe3979fa5b5d093ace4bfcb7c55fbd5d50cfd6d32726830efaf" }
+        { "op": "host-verify-ls", "path": ".", "expect": "--expect-name docs --expect-name hello.txt --expect-count 2" },
+        { "op": "host-verify-ls", "path": "docs", "expect": "--expect-name final.txt --expect-count 1" },
+        { "op": "host-verify-cat", "path": "docs/final.txt", "expect": "--expect-size 11 --expect-sha256 b500263e8e0ccbe3979fa5b5d093ace4bfcb7c55fbd5d50cfd6d32726830efaf" }
       ]
     },
     "canary-wrong-content": {
