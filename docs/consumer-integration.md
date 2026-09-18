@@ -7,7 +7,8 @@ first time; you can skim it on subsequent project setups.
 
 - A Rust filesystem driver (or formatter) project with a CLI binary.
 - A Windows VM reachable over SSH, with rustup installed and the
-  toolchain your driver builds with.
+  toolchain your driver builds with. [`vm-setup.md`](./vm-setup.md) sets
+  one up, including the fixed host-only address `VM_HOST` should name.
 - The driver's binary either prebuilt and synced onto the VM, or
   buildable via `cargo build --release` on the VM (the harness can do
   the sync + build for you, but does not require it).
