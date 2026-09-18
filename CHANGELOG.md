@@ -5,9 +5,9 @@ loosely follows Keep a Changelog; semver applies from `2.0.0` onward.
 
 ## [Unreleased]
 
-## v4.0.0
+## v4.0.0 — 2026-09-18
 
-_2026-09-18 — breaking._
+Breaking. Consumers rename in lockstep; see below.
 
 ### Changed (BREAKING)
 
@@ -78,6 +78,13 @@ _2026-09-18 — breaking._
   `{vm.harness_root}`**, as its `--help` already said it did. Before,
   the VM ran whatever copy of the op scripts had last been put there by
   hand, or failed when there was none.
+- **A relative `HARNESS_TOML` or `CONSUMER_ROOT` named different files in the
+  two halves of a run.** `run-tests.sh` resolved the path from the directory it
+  was invoked in, then changed into the consumer root and exported the same
+  relative path for the Rust runner, which resolved it from there — so the
+  shell and the runner could read different configs, or the runner none.
+  `_lib_harness.sh` now makes both absolute as it resolves them; a Windows
+  drive path is left as it is.
 - **Host verifiers work without `shasum`.** `scripts/host/verify-*.sh`
   use `sha256sum` when present and fall back to `shasum -a 256`; Git for
   Windows ships only the former, so any `--expect-sha256` check failed
