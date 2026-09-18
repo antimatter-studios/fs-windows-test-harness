@@ -110,13 +110,16 @@ mod tests {
     use super::*;
 
     fn load(text: &str) -> LocalConfig {
+        // A counter, not the clock. Tests run in parallel threads of ONE
+        // process, so the pid is shared, and macOS's SystemTime ticks in
+        // microseconds: two tests starting together got the same path, and
+        // whichever finished first deleted the other's file (`remove_file`
+        // then failed with NotFound, about one run in two).
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let path = std::env::temp_dir().join(format!(
             "fs-windows-test-harness-local-config-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         std::fs::write(&path, text).unwrap();
         let lc = LocalConfig::load(&path);
