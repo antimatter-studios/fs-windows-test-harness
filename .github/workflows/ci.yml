@@ -87,6 +87,12 @@ jobs:
       - name: run state-machine self-test
         run: bash tests/state-machine.sh
 
+      # The output budget's own tests, and the check that every chore task
+      # runs under one. A script self-test like the one above, so it lives in
+      # this job rather than adding a required check of its own.
+      - name: output-budget self-test (every task is budgeted)
+        run: bash tests/output-budget.sh
+
   config:
     name: config (schemas, examples, negative fixtures)
     runs-on: ubuntu-latest

@@ -12,31 +12,56 @@ chore_min_version: 0.6.0
 # These tasks run from the harness checkout. They need bash, python3
 # (3.11+, for tomllib) and cargo; `config` also needs the `jsonschema`
 # package, `lint` needs shellcheck.
+#
+# QUIET BY DEFAULT, --verbose ON REQUEST, AND THE BUDGET IS A NUMBER.
+#
+#   A task prints a VERDICT: one line saying it passed, how much it printed,
+#   and the log holding the run -- tmp/logs/<task>.log, kept in full. A
+#   failure prints the tail of that log. `chore <task> -- --verbose` (or
+#   FWTH_VERBOSE=1) streams the whole run as well.
+#
+#   Each task carries an OUTPUT BUDGET, lines and bytes, and a run that
+#   passed but printed more fails with status 65 -- told apart from a failing
+#   suite by its status. Measured on an arm64 Mac, taking the larger of a
+#   cold build (every crate compiled, so a line per crate) and a warm one:
+#
+#     task            measured        budget
+#     lint              42 / 1,402      70 / 2,400
+#     test              98 / 4,348     140 / 6,000   tests get added
+#     state-machine     34 / 1,634      50 / 2,400
+#     config             8 /   674      20 / 1,500
+#
+#   Raise one DELIBERATELY when a task grows. A budget nobody can breach
+#   measures nothing, and tests/output-budget.sh fails a task that has none.
+#   Why any of this: see the README, "Output: quiet by default".
 
 tasks:
   lint:
     desc: Shell syntax + shellcheck, cargo fmt + clippy (CI job `lint`)
     cmds:
-      - for f in scripts/*.sh scripts/host/*.sh tests/*.sh tests/smoke-consumer/*.sh; do bash -n "$f"; done
-      - shellcheck -x --severity=error scripts/*.sh scripts/host/*.sh
-      - shellcheck --severity=error tests/*.sh tests/smoke-consumer/*.sh
-      - cargo fmt --manifest-path runner/Cargo.toml --all -- --check
-      - cargo clippy --manifest-path runner/Cargo.toml --all-targets -- -D warnings
+      - |
+        scripts/task.sh lint lint 70 2400 -- bash -c '
+          set -e
+          for f in scripts/*.sh scripts/host/*.sh tests/*.sh tests/smoke-consumer/*.sh; do bash -n "$f"; done
+          shellcheck -x --severity=error scripts/*.sh scripts/host/*.sh
+          shellcheck --severity=error tests/*.sh tests/smoke-consumer/*.sh
+          cargo fmt --manifest-path runner/Cargo.toml --all -- --check
+          cargo clippy --manifest-path runner/Cargo.toml --all-targets -- -D warnings'
 
   test:
     desc: Runner unit tests (CI job `runner-unit`)
     cmds:
-      - cargo test --manifest-path runner/Cargo.toml --all-features --no-fail-fast
+      - scripts/task.sh test test 140 6000 -- cargo test --manifest-path runner/Cargo.toml --all-features --no-fail-fast
 
   state-machine:
     desc: claim / update-status / reset against a temp matrix, including concurrent writers (CI job `state-machine`)
     cmds:
-      - bash tests/state-machine.sh
+      - scripts/task.sh state-machine state-machine 50 2400 -- bash tests/state-machine.sh
 
   config:
     desc: Every consumer config validates; every invalid fixture is rejected (CI job `config`)
     cmds:
-      - python3 tests/validate-configs.py
+      - scripts/task.sh config config 20 1500 -- python3 tests/validate-configs.py
 
   check:
     desc: Every CI job that runs off Windows -- lint, test, state-machine, config
