@@ -3,6 +3,18 @@
 All notable changes to fs-windows-test-harness will land here. The format
 loosely follows Keep a Changelog; semver applies from `2.0.0` onward.
 
+## [Unreleased]
+
+### Removed
+
+- **The in-tree `.githooks/pre-commit` and `scripts/install-hooks.sh`.**
+  github-guard's hooks, installed into `.git/hooks`, now run fmt and clippy
+  for this repository's `runner/` crate (antimatter-studios/agent-skills#57).
+  Before that they only looked for a `Cargo.toml` at the repository root.
+  The in-tree hook also needed `core.hooksPath = .githooks`, which switched
+  off every github-guard guard in the clone. A clone installs the hooks with
+  github-guard's `install.sh`, which also clears `core.hooksPath`.
+
 ## v4.1.0 — 2026-09-18
 
 ### Added
