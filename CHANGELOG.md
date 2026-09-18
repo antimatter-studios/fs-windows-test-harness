@@ -5,7 +5,9 @@ loosely follows Keep a Changelog; semver applies from `2.0.0` onward.
 
 ## [Unreleased]
 
-To be released as **v4.0.0**: this is a breaking change.
+## v4.0.0
+
+_2026-09-18 — breaking._
 
 ### Changed (BREAKING)
 
