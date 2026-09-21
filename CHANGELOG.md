@@ -5,6 +5,14 @@ loosely follows Keep a Changelog; semver applies from `2.0.0` onward.
 
 ## [Unreleased]
 
+### Changed
+
+- **CI now enforces the output budgets it documents.** Lint, runner tests,
+  state-machine, config validation, and the Windows smoke task all run
+  through `scripts/task.sh`; smoke has a measured 500-line / 60,000-byte
+  budget. Every job uploads its full log, and the smoke job uploads its
+  scenario and VM diagnostics instead of dumping them into the workflow log.
+
 ### Removed
 
 - **The in-tree `.githooks/pre-commit` and `scripts/install-hooks.sh`.**

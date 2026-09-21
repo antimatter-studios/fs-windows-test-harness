@@ -139,6 +139,12 @@ The script is the same one [fs-linux-test-harness](https://github.com/antimatter
 ships, so a consumer of either harness budgets its tiers the same way; only
 the environment variable's prefix differs.
 
+CI runs every task through the same budgeted wrapper, including the Windows
+`smoke` task. The full logs are uploaded as workflow artifacts under
+`tmp/logs/`; the smoke artifact also contains the pulled scenario and VM
+diagnostics. A green job therefore stays quiet while its complete evidence is
+still available for inspection.
+
 ## CI and automated merging
 
 A green CI run is meant to be enough to merge on, with no human looking
