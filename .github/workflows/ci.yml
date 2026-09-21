@@ -29,28 +29,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y shellcheck
 
-      - name: bash -n every shell script
-        run: |
-          set -e
-          for f in scripts/*.sh scripts/host/*.sh tests/*.sh tests/smoke-consumer/*.sh; do
-            echo "checking: $f"
-            bash -n "$f"
-          done
-
-      - name: shellcheck scripts
-        run: |
-          # `-x` so shellcheck follows `source _lib_harness.sh`.
-          # `--severity=error` so style/info/warning lints surface in
-          # the log but only outright errors fail CI. The harness uses
-          # several intentional patterns (unquoted SSH_OPTS for word
-          # splitting, dynamic-path source, transient loop counters)
-          # that trip warnings without being bugs.
-          shellcheck -x --severity=error scripts/*.sh scripts/host/*.sh
-
-      - name: shellcheck test scripts
-        run: |
-          shellcheck --severity=error tests/*.sh tests/smoke-consumer/*.sh
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -59,11 +37,25 @@ jobs:
         with:
           workspaces: runner -> target
 
-      - name: cargo fmt --check
-        run: cargo fmt --manifest-path runner/Cargo.toml --all -- --check
+      - name: lint and cargo checks
+        run: |
+          bash scripts/task.sh lint lint 70 2400 -- bash -c '
+            set -e
+            for f in scripts/*.sh scripts/host/*.sh tests/*.sh tests/smoke-consumer/*.sh; do
+              bash -n "$f"
+            done
+            shellcheck -x --severity=error scripts/*.sh scripts/host/*.sh
+            shellcheck --severity=error tests/*.sh tests/smoke-consumer/*.sh
+            cargo fmt --manifest-path runner/Cargo.toml --all -- --check
+            cargo clippy --manifest-path runner/Cargo.toml --all-targets -- -D warnings'
 
-      - name: cargo clippy
-        run: cargo clippy --manifest-path runner/Cargo.toml --all-targets -- -D warnings
+      - name: upload lint log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-lint-logs-${{ github.run_id }}
+          path: tmp/logs/
+          if-no-files-found: warn
 
   runner-unit:
     name: runner unit tests
@@ -76,7 +68,15 @@ jobs:
           workspaces: runner -> target
 
       - name: cargo test
-        run: cargo test --manifest-path runner/Cargo.toml --all-features --no-fail-fast
+        run: bash scripts/task.sh test test 140 6000 -- cargo test --manifest-path runner/Cargo.toml --all-features --no-fail-fast
+
+      - name: upload runner log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-runner-logs-${{ github.run_id }}
+          path: tmp/logs/
+          if-no-files-found: warn
 
   state-machine:
     name: state-machine integration test
@@ -85,13 +85,21 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: run state-machine self-test
-        run: bash tests/state-machine.sh
+        run: bash scripts/task.sh state-machine state-machine 50 2400 -- bash tests/state-machine.sh
 
       # The output budget's own tests, and the check that every chore task
       # runs under one. A script self-test like the one above, so it lives in
       # this job rather than adding a required check of its own.
       - name: output-budget self-test (every task is budgeted)
-        run: bash tests/output-budget.sh
+        run: bash scripts/task.sh output-budget output-budget 120 12000 -- bash tests/output-budget.sh
+
+      - name: upload state-machine logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-state-machine-logs-${{ github.run_id }}
+          path: tmp/logs/
+          if-no-files-found: warn
 
   config:
     name: config (schemas, examples, negative fixtures)
@@ -105,7 +113,15 @@ jobs:
         run: python3 -m pip install --user --upgrade jsonschema
 
       - name: validate every consumer config; reject every invalid fixture
-        run: python3 tests/validate-configs.py
+        run: bash scripts/task.sh config config 20 1500 -- python3 tests/validate-configs.py
+
+      - name: upload config log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-config-logs-${{ github.run_id }}
+          path: tmp/logs/
+          if-no-files-found: warn
 
   smoke:
     name: smoke (windows-latest, WinFsp memfs, run-tests.sh over SSH)
@@ -166,27 +182,37 @@ jobs:
         run: |
           # No .test-env and no terminal: run-tests.sh bootstraps from the
           # flags, and its preflight trusts localhost's host key itself.
-          bash tests/smoke-consumer/run-smoke.sh \
+          bash scripts/task.sh smoke smoke 500 60000 -- \
+            bash tests/smoke-consumer/run-smoke.sh \
             --vm-host=runneradmin@localhost \
             --ssh-key="$(cygpath -m ~/.ssh/fswth-smoke)" \
             --vm-workdir="$VM_WORKDIR"
 
-      - name: dump diagnostics on failure
-        if: failure()
+      - name: collect VM diagnostics
+        if: always()
         run: |
-          dump() {
-            [ -d "$1" ] || { echo "(no $1)"; return; }
-            find "$1" -type f | sort | while read -r f; do
-              echo "----- $f -----"
-              head -c 20000 "$f"; echo
-            done
-          }
-          dump tests/smoke-consumer/test-diagnostics
-          # On the "VM": memfs launcher sync logs beside the images, and
-          # Invoke-WithMount's capture of the last mount's output.
-          for f in "$(cygpath -u "$VM_WORKDIR")"/*.log ~/dev/ext4-work/last-mount-diag/*; do
-            [ -f "$f" ] && { echo "----- $f -----"; cat "$f"; echo; }
-          done
+          vm_root="$(cygpath -u "$VM_WORKDIR")"
+          vm_dest="tests/smoke-consumer/test-diagnostics/vm-workdir"
+          last_dest="tests/smoke-consumer/test-diagnostics/last-mount-diag"
+          mkdir -p "$vm_dest" "$last_dest"
+          if [ -d "$vm_root" ]; then
+            find "$vm_root" -maxdepth 1 -type f -name '*.log' \
+              -exec cp -f {} "$vm_dest/" \; || true
+          fi
+          if [ -d "$HOME/dev/ext4-work/last-mount-diag" ]; then
+            find "$HOME/dev/ext4-work/last-mount-diag" -maxdepth 1 -type f \
+              -exec cp -f {} "$last_dest/" \; || true
+          fi
+
+      - name: upload smoke logs and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-smoke-diagnostics-${{ github.run_id }}
+          path: |
+            tmp/logs/
+            tests/smoke-consumer/test-diagnostics/
+          if-no-files-found: warn
 
   ci-ok:
     # THE required check for branch protection / auto-merge. Fails if any

@@ -86,7 +86,7 @@ check_eq "$rc" 0 "without a budget a long run is allowed"
 # The rule, checked against this repository's own chores.yml: each task that
 # runs a suite goes through output-budget.sh with two non-zero budgets. A task
 # added later without one is exactly how "quiet" rots, so it fails here.
-for task in lint test state-machine config; do
+for task in lint test state-machine config smoke; do
     block="$(awk -v t="  $task:" '
         $0 == t { inside = 1; next }
         inside && /^  [a-z][a-z:_-]*:$/ { inside = 0 }
