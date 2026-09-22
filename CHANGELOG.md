@@ -5,6 +5,13 @@ loosely follows Keep a Changelog; semver applies from `2.0.0` onward.
 
 ## [Unreleased]
 
+### Added
+
+- **Per-scenario mutual exclusion with `exclusive_group`.** Scenarios that
+  name the same scarce resource still share the runner's global parallelism
+  limit, but never execute together. This lets consumers serialize only
+  disk- or memory-heavy cases instead of slowing the entire matrix.
+
 ### Fixed
 
 - **Two matrix processes can no longer share one VM workdir.**
@@ -18,6 +25,10 @@ loosely follows Keep a Changelog; semver applies from `2.0.0` onward.
 
 ### Changed
 
+- **A scenario must pass on its first attempt.** The runner no longer retries
+  a failed scenario up to five times and turns a later pass green. Transient
+  infrastructure and resource failures are now visible failures with their
+  first diagnostics intact.
 - **CI now enforces the output budgets it documents.** Lint, runner tests,
   state-machine, config validation, and the Windows smoke task all run
   through `scripts/task.sh`; smoke has a measured 500-line / 60,000-byte

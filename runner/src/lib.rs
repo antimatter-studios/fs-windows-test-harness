@@ -67,6 +67,18 @@ impl Harness {
         let matrix_path = consumer_root.join(&matrix_rel);
         let raw = std::fs::read_to_string(&matrix_path)?;
         let matrix: Matrix = serde_json::from_str(&raw)?;
+        for (name, scenario) in &matrix.scenarios {
+            if scenario
+                .exclusive_group
+                .as_deref()
+                .is_some_and(|group| group.trim().is_empty())
+            {
+                anyhow::bail!(
+                    "{} scenario '{name}': exclusive_group must not be empty",
+                    matrix_path.display()
+                );
+            }
+        }
         let run_id = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()

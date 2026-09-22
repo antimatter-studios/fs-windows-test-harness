@@ -721,6 +721,7 @@ mod tests {
             image: String::new(),
             recipe,
             post_verify: None,
+            exclusive_group: None,
             extra: serde_json::Map::new(),
             status: None,
             attempts: None,

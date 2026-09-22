@@ -26,6 +26,11 @@
           "type": "string",
           "description": "Path under harness.toml [vm.image_dir] to the test image. May be empty for scenarios that build their image at scenario-time."
         },
+        "exclusive_group": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional scarce-resource group. Scenarios carrying the same group name are mutually exclusive while other scenarios retain normal parallelism."
+        },
         "volume_params": {
           "type": "object",
           "description": "Volume-shape inputs the consumer's recipe substitutes via `{scenario.volume_params.<field>}` into op templates (typical fields: `size_mib`, `label`, `alloc_unit_size`). Used by consumers whose recipes build the image at scenario-time (e.g. `mac-format` ops sizing a fresh .img per scenario). Inner field set is open — each consumer documents its own keys.",

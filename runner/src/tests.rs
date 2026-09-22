@@ -95,6 +95,27 @@ fn matrix_deserialises_recipe_with_host_vm_steps() {
 }
 
 #[test]
+fn scenario_deserialises_an_exclusive_group_as_runner_metadata() {
+    let raw = r#"
+    {
+      "scenarios": {
+        "large-a": {
+          "exclusive_group": "large-volume",
+          "recipe": [ { "op": "noop" } ]
+        }
+      }
+    }
+    "#;
+    let matrix: Matrix = serde_json::from_str(raw).expect("matrix parses");
+    let scn = matrix.scenarios.get("large-a").expect("scenario present");
+    assert_eq!(scn.exclusive_group.as_deref(), Some("large-volume"));
+
+    let re_emitted = serde_json::to_value(scn).expect("re-emit");
+    assert_eq!(re_emitted["exclusive_group"], "large-volume");
+    assert!(!scn.extra.contains_key("exclusive_group"));
+}
+
+#[test]
 fn scenario_preserves_unknown_consumer_fields_through_round_trip() {
     // Consumer-defined fields on a scenario (volume_params, fixtures,
     // verdict_shape, custom annotations, ...) must round-trip through

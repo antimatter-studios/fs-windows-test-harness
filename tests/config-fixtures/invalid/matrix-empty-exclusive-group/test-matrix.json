@@ -1,0 +1,8 @@
+{
+  "scenarios": {
+    "large-volume": {
+      "exclusive_group": "",
+      "recipe": []
+    }
+  }
+}
