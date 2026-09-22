@@ -178,6 +178,37 @@ jobs:
       - name: build run-matrix
         run: cargo build --manifest-path runner/Cargo.toml --release --bin run-matrix
 
+      - name: VM workdir lock unit test
+        shell: pwsh
+        run: ./tests/vm-lock.ps1
+
+      - name: a concurrent run against the same VM workdir is rejected
+        run: |
+          token="ci-lock-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup_lock() {
+            powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass \
+              -File scripts/vm/matrix-run-lock.ps1 \
+              -Action Release -Workdir "$VM_WORKDIR" -RunId held-by-ci \
+              -OwnerHost github-actions -OwnerPid "$$" -OwnerToken "$token"
+          }
+          trap cleanup_lock EXIT
+          powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass \
+            -File scripts/vm/matrix-run-lock.ps1 \
+            -Action Acquire -Workdir "$VM_WORKDIR" -RunId held-by-ci \
+            -OwnerHost github-actions -OwnerPid "$$" -OwnerToken "$token"
+
+          set +e
+          output=$(bash scripts/run-tests.sh smoke- \
+            --vm-host=runneradmin@localhost \
+            --ssh-key="$(cygpath -m ~/.ssh/fswth-smoke)" \
+            --vm-workdir="$VM_WORKDIR" 2>&1)
+          rc=$?
+          set -e
+          printf '%s\n' "$output"
+          test "$rc" -eq 73
+          grep -q 'a matrix is already running' <<< "$output"
+          grep -q 'run_id=held-by-ci' <<< "$output"
+
       - name: smoke test (run-tests.sh -> ssh localhost -> WinFsp memfs)
         run: |
           # No .test-env and no terminal: run-tests.sh bootstraps from the

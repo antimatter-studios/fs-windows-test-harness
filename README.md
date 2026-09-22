@@ -176,8 +176,12 @@ whose volumes are tar images:
 
 1. **bootstrap and preflight** -- `.test-env` is written from flags, and
    the SSH preflight trusts the new host key itself;
-2. **ship** -- harness and consumer VM scripts go to the VM workdir;
-3. **`smoke-rw-roundtrip`** -- the host creates an image and ships it to
+2. **exclusive VM-workdir claim** -- an atomic lock rejects a second
+   `run-tests.sh` process targeting the same VM workdir, before either run can
+   reinstall, ship, create scenario images, or sweep old images; CI exercises
+   both contention and owner-checked release;
+3. **ship** -- harness and consumer VM scripts go to the VM workdir;
+4. **`smoke-rw-roundtrip`** -- the host creates an image and ships it to
    the VM; each VM step mounts it through memfs on a drive letter
    (ready-line matched), runs one of the harness's op scripts (list, read
    with content/size/sha256 checks, mkdir, write, rename, unlink, rmdir)
@@ -188,7 +192,7 @@ whose volumes are tar images:
    `recipe.json`, `results.json`, `run-manifest.json` and each step's
    `step.json` / `stdout.txt` / `stderr.txt` present, and each op's output
    proving it acted on the drive;
-4. **`canary-wrong-content`** -- expected to fail: it reads a file back
+5. **`canary-wrong-content`** -- expected to fail: it reads a file back
    with the wrong expected content. `run-tests.sh` must exit non-zero and
    the harness must report `failed` at that step, with the verifier's
    `content mismatch`. A harness that cannot go red proves nothing when

@@ -5,6 +5,15 @@ loosely follows Keep a Changelog; semver applies from `2.0.0` onward.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Two matrix processes can no longer share one VM workdir.**
+  `run-tests.sh` atomically claims a lock directory after SSH preflight and
+  before reinstall, ship, or scenario execution. Contention fails fast with
+  the owning run, host, and PID; cleanup removes only a lock whose random
+  ownership token still matches. This prevents flat scenario image names and
+  broad image cleanup from overwriting or deleting another run's images.
+
 ### Changed
 
 - **CI now enforces the output budgets it documents.** Lint, runner tests,
