@@ -207,7 +207,9 @@ jobs:
           rc=$?
           set -e
           printf '%s\n' "$output"
-          test "$rc" -eq 73
+          # Windows OpenSSH's PowerShell default shell normalises the helper's
+          # exit 73 to status 1; the direct test above checks the exact code.
+          test "$rc" -ne 0
           grep -q 'a matrix is already running' <<< "$output"
           grep -q 'run_id=held-by-ci' <<< "$output"
 
