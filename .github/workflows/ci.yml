@@ -185,20 +185,22 @@ jobs:
       - name: a concurrent run against the same VM workdir is rejected
         run: |
           token="ci-lock-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          lock_script="$PWD/scripts/vm/matrix-run-lock.ps1"
           cleanup_lock() {
             powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass \
-              -File scripts/vm/matrix-run-lock.ps1 \
+              -File "$lock_script" \
               -Action Release -Workdir "$VM_WORKDIR" -RunId held-by-ci \
               -OwnerHost github-actions -OwnerPid "$$" -OwnerToken "$token"
           }
           trap cleanup_lock EXIT
           powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass \
-            -File scripts/vm/matrix-run-lock.ps1 \
+            -File "$lock_script" \
             -Action Acquire -Workdir "$VM_WORKDIR" -RunId held-by-ci \
             -OwnerHost github-actions -OwnerPid "$$" -OwnerToken "$token"
 
           set +e
-          output=$(bash scripts/run-tests.sh smoke- \
+          cd tests/smoke-consumer
+          output=$(bash ../../scripts/run-tests.sh smoke- \
             --vm-host=runneradmin@localhost \
             --ssh-key="$(cygpath -m ~/.ssh/fswth-smoke)" \
             --vm-workdir="$VM_WORKDIR" 2>&1)
