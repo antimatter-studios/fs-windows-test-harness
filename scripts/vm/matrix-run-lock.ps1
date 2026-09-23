@@ -32,7 +32,9 @@ function Read-Owner {
         foreach ($field in @('run_id', 'host', 'pid', 'token', 'renewed_utc', 'lease_seconds')) {
             if ($null -eq $value.$field -or [string]$value.$field -eq '') { return $null }
         }
-        $timestamp = [DateTimeOffset]::Parse($value.renewed_utc)
+        # ConvertFrom-Json may return a DateTime; Parse stringifies it without
+        # its UTC kind and then treats it as local time.
+        $timestamp = [DateTimeOffset]$value.renewed_utc
         $seconds = [int]$value.lease_seconds
         if ($seconds -lt 1 -or $seconds -gt 86400) { return $null }
         return @{ Value = $value; Renewed = $timestamp; Seconds = $seconds }
@@ -44,16 +46,20 @@ function Write-Owner($value) {
     # A crash while writing a replacement cannot leave a half-written JSON
     # file: the old owner.json remains valid until the rename succeeds.
     $temp = Join-Path $lockPath ('.owner-' + [Guid]::NewGuid().ToString('N') + '.json')
+    $backup = Join-Path $lockPath ('.owner-backup-' + [Guid]::NewGuid().ToString('N') + '.json')
     try {
         $value | ConvertTo-Json | Set-Content -LiteralPath $temp -Encoding UTF8
         if (Test-Path -LiteralPath $ownerPath) {
-            [IO.File]::Replace($temp, $ownerPath, $null)
+            [IO.File]::Replace($temp, $ownerPath, $backup)
         }
         else {
             [IO.File]::Move($temp, $ownerPath)
         }
     }
-    finally { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
+    finally {
+        Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Reject-Owner($reason) {
@@ -106,9 +112,9 @@ try {
             else {
                 # Missing/corrupt metadata may be an acquisition interrupted
                 # before owner.json was written. Never immediately reclaim it.
-                $lastMutation = (Get-Item -LiteralPath $lockPath).LastWriteTimeUtc
+                $lastMutation = (Get-Item -LiteralPath $lockPath -Force).LastWriteTimeUtc
                 if (Test-Path -LiteralPath $ownerPath -PathType Leaf) {
-                    $ownerModified = (Get-Item -LiteralPath $ownerPath).LastWriteTimeUtc
+                    $ownerModified = (Get-Item -LiteralPath $ownerPath -Force).LastWriteTimeUtc
                     if ($ownerModified -gt $lastMutation) { $lastMutation = $ownerModified }
                 }
                 $age = ($now.UtcDateTime - $lastMutation).TotalSeconds

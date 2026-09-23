@@ -60,10 +60,16 @@ try {
     Assert-True ($contender.Output -match 'a matrix is already running') 'contention is explained'
     Assert-True ($contender.Output -match 'run_id=run-a') 'contention names the current run'
 
+    # Renew a nearly expired lease without waiting for wall-clock time.
+    $owner.renewed_utc = [DateTime]::UtcNow.AddMinutes(-4).ToString('o')
+    $owner | ConvertTo-Json | Set-Content -LiteralPath $ownerPath -Encoding UTF8
     $renew = Invoke-Lock Renew 'run-a' 'token-a'
-    Assert-True ($renew.ExitCode -eq 0) 'live owner renews its lease'
+    Assert-True ($renew.ExitCode -eq 0) "live owner renews its lease: $($renew.Output)"
     $renewed = Get-Content -LiteralPath $ownerPath -Raw | ConvertFrom-Json
     Assert-True (([DateTime]::UtcNow - [DateTime]::Parse($renewed.renewed_utc).ToUniversalTime()).TotalSeconds -lt 30) 'renewal refreshes VM time'
+    Assert-True ($renewed.token -eq 'token-a' -and $renewed.run_id -eq 'run-a') 'renewal preserves ownership'
+    Assert-True (@(Get-ChildItem -LiteralPath (Split-Path -Parent $ownerPath) -Filter '.owner-*.json' -Force).Count -eq 0) 'renewal removes temporary metadata'
+    Assert-True ((Invoke-Lock Acquire 'run-b' 'token-b').ExitCode -eq 73) 'renewed lease prevents reclamation'
     $wrongRenew = Invoke-Lock Renew 'run-b' 'token-b'
     Assert-True ($wrongRenew.ExitCode -eq 74) 'non-owner cannot renew'
     $verify = Invoke-Lock Verify 'run-a' 'token-a'
@@ -130,11 +136,12 @@ try {
         Assert-True ((Invoke-Lock Acquire "bad-$bad" "bad-$bad-token").ExitCode -eq 0) "$bad fixture acquires"
         if ($bad -eq 'missing') { Remove-Item -LiteralPath $ownerPath }
         else { Set-Content -LiteralPath $ownerPath -Value '{bad json' }
-        Assert-True ((Invoke-Lock Acquire 'too-soon' 'too-soon-token').ExitCode -eq 73) "fresh $bad metadata is fenced"
+        $tooSoon = Invoke-Lock Acquire 'too-soon' 'too-soon-token'
+        Assert-True ($tooSoon.ExitCode -eq 73) "fresh $bad metadata is fenced: $($tooSoon.Output)"
         if ($bad -eq 'corrupt') {
-            (Get-Item -LiteralPath $ownerPath).LastWriteTimeUtc = [DateTime]::UtcNow.AddMinutes(-20)
+            (Get-Item -LiteralPath $ownerPath -Force).LastWriteTimeUtc = [DateTime]::UtcNow.AddMinutes(-20)
         }
-        (Get-Item -LiteralPath (Split-Path -Parent $ownerPath)).LastWriteTimeUtc = [DateTime]::UtcNow.AddMinutes(-20)
+        (Get-Item -LiteralPath (Split-Path -Parent $ownerPath) -Force).LastWriteTimeUtc = [DateTime]::UtcNow.AddMinutes(-20)
         Assert-True ((Invoke-Lock Acquire "after-$bad" "after-$bad-token").ExitCode -eq 0) "aged $bad metadata recovers"
         Assert-True ((Invoke-Lock Release "after-$bad" "after-$bad-token").ExitCode -eq 0) "aged $bad replacement releases"
     }
