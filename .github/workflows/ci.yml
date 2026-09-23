@@ -136,6 +136,9 @@ jobs:
     timeout-minutes: 30
     env:
       VM_WORKDIR: C:/fswth-vm/smoke-consumer
+      # Short test lease makes renewal observable during smoke.
+      FSWTH_VM_LEASE_SECONDS: 30
+      FSWTH_VM_HEARTBEAT_SECONDS: 5
     defaults:
       run:
         shell: bash

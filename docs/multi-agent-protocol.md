@@ -84,10 +84,11 @@ What's safe in parallel:
 
 What's NOT safe in parallel:
 
-- **Two agents pointing at the same VM.** WinFsp drive-letter
-  assignment, mount registration, and the fixed `MOUNT_LOCK` mutex in
-  the runner all assume a single concurrent mount per VM. If you must
-  share a VM, serialise externally — the harness will not save you.
+- **Two agents pointing at the same VM workdir.** WinFsp drive-letter
+  assignment, mount registration, and flat scenario image names still
+  require serial execution. The harness now enforces that boundary with
+  a renewable workdir lease: a second run is rejected while the first
+  is live and may recover the workdir only after the lease expires.
 - **Editing `test-matrix.json` by hand while a session is claimed.**
   You will race the atomic-rename pattern. Either pause the agents or
   edit a scenario while it's in `pending` state.

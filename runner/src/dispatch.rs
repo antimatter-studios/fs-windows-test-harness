@@ -335,9 +335,45 @@ fn run_vm(
         cmd.args(["-i", key.as_str(), "-o", "IdentitiesOnly=yes"]);
     }
     cmd.arg(&host_owned);
-    cmd.arg(command);
+    cmd.arg(vm_lock_command("Invoke", command)?);
 
     spawn_with_diag(&mut cmd, step_dir)
+}
+
+fn ps_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+/// run-tests.sh exports these only while it owns a VM lease. A partial
+/// environment is an error, not an excuse to issue an unfenced command.
+fn vm_lock_command(action: &str, command: &str) -> Result<String, String> {
+    let script = match std::env::var("FSWTH_VM_LOCK_SCRIPT") {
+        Ok(value) => value,
+        Err(_) => return Ok(command.to_string()),
+    };
+    let required = |key: &str| {
+        std::env::var(key).map_err(|_| format!("VM lease is active but {key} is missing"))
+    };
+    let workdir = required("FSWTH_VM_LOCK_WORKDIR")?;
+    let run_id = required("FSWTH_VM_LOCK_RUN_ID")?;
+    let token = required("FSWTH_VM_LOCK_TOKEN")?;
+    let host = required("FSWTH_VM_LOCK_HOST")?;
+    let pid = required("FSWTH_VM_LOCK_PID")?;
+    let args = format!(
+        "& {} -Action {} -Workdir {} -RunId {} -OwnerHost {} -OwnerPid {} -OwnerToken {}",
+        ps_literal(&script),
+        action,
+        ps_literal(&workdir),
+        ps_literal(&run_id),
+        ps_literal(&host),
+        ps_literal(&pid),
+        ps_literal(&token)
+    );
+    if action == "Invoke" {
+        Ok(format!("{args} -Command {}", ps_literal(command)))
+    } else {
+        Ok(args)
+    }
 }
 
 /// Run a `Command` and capture stdout/stderr to `step_dir`.
@@ -411,6 +447,40 @@ fn run_builtin_ship(
     }
 
     let started = Instant::now();
+    let lease_stage = if std::env::var_os("FSWTH_VM_LOCK_SCRIPT").is_some() {
+        let workdir = std::env::var("FSWTH_VM_LOCK_WORKDIR")
+            .map_err(|_| "VM lease is active but workdir is missing".to_string())?;
+        let token = std::env::var("FSWTH_VM_LOCK_TOKEN")
+            .map_err(|_| "VM lease is active but owner token is missing".to_string())?;
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| format!("clock: {e}"))?
+            .as_nanos();
+        Some(format!(
+            "{workdir}/.fswth-matrix.lock/{token}/ship-{}-{stamp}",
+            std::process::id()
+        ))
+    } else {
+        None
+    };
+    let guard_dir = step_dir.join("lease-guard");
+    if lease_stage.is_some() {
+        std::fs::create_dir_all(&guard_dir)
+            .map_err(|e| format!("mkdir {}: {e}", guard_dir.display()))?;
+    }
+    let mut guard_status = Some(0);
+    if let Some(stage) = &lease_stage {
+        let guard = if op_name == "ship-to-vm" {
+            "$null = 0".to_string()
+        } else {
+            format!(
+                "Copy-Item -LiteralPath {} -Destination {} -Recurse -Force",
+                ps_literal(&src),
+                ps_literal(stage)
+            )
+        };
+        guard_status = run_vm(&guard, &config.vm.host, &config.vm.ssh_key, &guard_dir)?;
+    }
     let mut cmd = Command::new("scp");
     cmd.args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]);
     if let Some(key) = &key_owned {
@@ -418,13 +488,51 @@ fn run_builtin_ship(
     }
     cmd.arg("-r"); // tolerate directory shipping; single-file is unaffected.
     let (label, src_arg, dest_arg) = if op_name == "ship-to-vm" {
-        ("ship-to-vm", src.clone(), format!("{vm_host}:{dest}"))
+        let target = lease_stage.as_deref().unwrap_or(&dest);
+        ("ship-to-vm", src.clone(), format!("{vm_host}:{target}"))
     } else {
-        ("ship-to-host", format!("{vm_host}:{src}"), dest.clone())
+        let source = lease_stage.as_deref().unwrap_or(&src);
+        ("ship-to-host", format!("{vm_host}:{source}"), dest.clone())
     };
     cmd.arg(&src_arg).arg(&dest_arg);
 
-    let outcome = spawn_with_diag(&mut cmd, step_dir);
+    let mut outcome = if guard_status == Some(0) {
+        spawn_with_diag(&mut cmd, step_dir)
+    } else {
+        Ok(guard_status)
+    };
+    if outcome.as_ref().ok() == Some(&Some(0)) && op_name == "ship-to-vm" {
+        if let Some(stage) = &lease_stage {
+            let move_command = format!(
+                "Move-Item -LiteralPath {} -Destination {} -Force",
+                ps_literal(stage),
+                ps_literal(&dest)
+            );
+            outcome = run_vm(
+                &move_command,
+                &config.vm.host,
+                &config.vm.ssh_key,
+                &guard_dir,
+            );
+        }
+    }
+    if op_name == "ship-to-host" {
+        if let Some(stage) = &lease_stage {
+            let cleanup_command = format!(
+                "Remove-Item -LiteralPath {} -Recurse -Force",
+                ps_literal(stage)
+            );
+            let cleanup = run_vm(
+                &cleanup_command,
+                &config.vm.host,
+                &config.vm.ssh_key,
+                &guard_dir,
+            );
+            if outcome.as_ref().ok() == Some(&Some(0)) {
+                outcome = cleanup;
+            }
+        }
+    }
     let duration = started.elapsed();
 
     match outcome {
