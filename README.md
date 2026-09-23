@@ -80,11 +80,70 @@ chore lint     # bash -n, shellcheck, cargo fmt --check, cargo clippy
 chore test     # runner unit tests
 chore state-machine
 chore config   # needs python3 3.11+ and `pip install jsonschema`
+chore test -- --verbose   # any task: stream the whole run, not just the verdict
 
 # End to end against a Windows host with WinFsp and sshd (PowerShell as
 # the default shell). Flags are remembered in tests/smoke-consumer/.test-env.
 chore smoke --vm-host user@vm --ssh-key ~/.ssh/vm --vm-workdir C:/fswth/smoke-consumer
 ```
+
+## Output: quiet by default, `--verbose` on request
+
+A task prints a **verdict**, not a transcript: a line saying it passed, how
+much it printed, and the path of the log that holds everything else. The
+detail is never thrown away — it is written to a log under the repository's
+own `tmp/logs/` and named in that line — but a passing run does not put it on
+the terminal.
+
+| | Prints |
+| --- | --- |
+| **Pass** | `test: ok (52 lines, 2870 bytes) — …/tmp/logs/test.log` |
+| **Fail** | the same label with `FAILED (exit N)`, then the tail of the log — the failing test and its output, not the whole run |
+| **`--verbose` / `-v`, or `FWTH_VERBOSE=1`** | everything, streamed live: every test name, every matrix step, every guest command |
+| **CI** | the quiet form, with the log uploaded as an artefact |
+
+Two reasons, and the second is the one people forget. A run that prints
+three thousand lines hides the twenty that matter, so a failure costs
+minutes of scrolling. And every reader pays for that output — a person, a CI
+log viewer, and an agent working on the repository, which re-reads its whole
+transcript on each step and so pays for a verbose run many times over.
+
+For a consumer the loud part is the **matrix**: a line per recipe step per
+scenario, and chkdsk's report for every image it checks. That is exactly what
+someone needs when a scenario fails, so it goes to the log — never to
+`/dev/null` — and the tail of it is what a failure prints.
+
+[`scripts/output-budget.sh`](./scripts/output-budget.sh) does this for any
+command: it runs it, writes everything to `--log`, prints one line on success,
+prints the tail on failure, and **exits 65 when a run passed but printed more
+than its budget** — a status you can tell apart from a failing suite.
+`--verbose` (or `FWTH_VERBOSE=1`) streams as well, and does not exempt a run
+from its budget. The command's own exit status is what escapes: `cmd | tee log`
+reports tee's, which is how a red suite reads green.
+
+```sh
+../fs-windows-test-harness/scripts/output-budget.sh \
+    --log tmp/logs/matrix.log --max-lines 600 --max-bytes 60000 --label 'test:matrix' \
+    -- scripts/run-matrix.sh
+```
+
+Set a budget from a measured run, and raise it deliberately when a suite
+grows — the same way an executed-test floor is set. A budget nobody can
+breach measures nothing. This repository's own tasks run through
+[`scripts/task.sh`](./scripts/task.sh), with the measured budgets beside each
+command in [`chores.yml`](./chores.yml), and
+[`tests/output-budget.sh`](./tests/output-budget.sh) fails any task that has
+none.
+
+The script is the same one [fs-linux-test-harness](https://github.com/antimatter-studios/fs-linux-test-harness)
+ships, so a consumer of either harness budgets its tiers the same way; only
+the environment variable's prefix differs.
+
+CI runs every task through the same budgeted wrapper, including the Windows
+`smoke` task. The full logs are uploaded as workflow artifacts under
+`tmp/logs/`; the smoke artifact also contains the pulled scenario and VM
+diagnostics. A green job therefore stays quiet while its complete evidence is
+still available for inspection.
 
 ## CI and automated merging
 

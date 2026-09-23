@@ -5,6 +5,41 @@ loosely follows Keep a Changelog; semver applies from `2.0.0` onward.
 
 ## [Unreleased]
 
+### Changed
+
+- **CI now enforces the output budgets it documents.** Lint, runner tests,
+  state-machine, config validation, and the Windows smoke task all run
+  through `scripts/task.sh`; smoke has a measured 500-line / 60,000-byte
+  budget. Every job uploads its full log, and the smoke job uploads its
+  scenario and VM diagnostics instead of dumping them into the workflow log.
+
+### Removed
+
+- **The in-tree `.githooks/pre-commit` and `scripts/install-hooks.sh`.**
+  github-guard's hooks, installed into `.git/hooks`, now run fmt and clippy
+  for this repository's `runner/` crate (antimatter-studios/agent-skills#57).
+  Before that they only looked for a `Cargo.toml` at the repository root.
+  The in-tree hook also needed `core.hooksPath = .githooks`, which switched
+  off every github-guard guard in the clone. A clone installs the hooks with
+  github-guard's `install.sh`, which also clears `core.hooksPath`.
+
+## v4.1.0 — 2026-09-18
+
+### Added
+
+- **`scripts/output-budget.sh`: a task prints a verdict, `--verbose` prints
+  the run, and a budget can fail the build.** It runs a command, writes the
+  whole run to a log, prints one line on success and the log's tail on
+  failure, and exits 65 when a run passed but printed more than its line or
+  byte budget. `--verbose` or `FWTH_VERBOSE=1` streams as well, and is still
+  budgeted. The same script as fs-linux-test-harness's, so consumers of
+  either harness budget their test tiers the same way -- the matrix run and
+  chkdsk output go to a log, not the terminal. See the README, "Output: quiet
+  by default".
+- This repository's own tasks (`lint`, `test`, `state-machine`, `config`)
+  now run that way through `scripts/task.sh`, each under a measured budget,
+  and `tests/output-budget.sh` fails a task added without one.
+
 ## v4.0.0 — 2026-09-18
 
 Breaking. Consumers rename in lockstep; see below.
