@@ -14,6 +14,12 @@ loosely follows Keep a Changelog; semver applies from `2.0.0` onward.
 
 ### Fixed
 
+- **A long VM command no longer fails the scenarios running beside it.**
+  Every VM command of a run held the workdir's operation gate exclusively,
+  so parallel scenarios queued on it, and any command longer than the gate's
+  15-second wait (a chkdsk, say) failed its siblings' next VM step. The
+  owning run's commands now share the gate. Acquire and release still take
+  it exclusively. (#34)
 - **Two matrix processes can no longer share one VM workdir.**
   `run-tests.sh` atomically claims a lock directory after SSH preflight and
   before reinstall, ship, or scenario execution. Contention fails fast with
