@@ -1,18 +1,23 @@
 #!/usr/bin/env bash
 #
-# output-budget.sh -- the budget refuses a loud run, and never hides a failing
-# one.
+# output-budget.sh -- the wrapper comes from rust-fs-core, the refusals are
+# loud, and every task is budgeted.
 #
-# The script exists because "keep the output quiet" as a convention lasts about
-# a week. The properties worth pinning are the ones that make it safe to rely
-# on: the COMMAND's status is what escapes (a `| tee` that reported tee's status
-# is the defect that makes a red suite read green), a failure shows the tail
-# rather than the budget complaint, and a passing-but-loud run is told apart
-# from a failing one by its own exit code.
+# WHAT THIS DOES NOT TEST. The wrapper's own behaviour suite lives in
+# rust-fs-core (tests/output_budget.rs), where the script does. Duplicating it
+# here would be the committed copy again in another form: two suites agreeing
+# with each other and nothing comparing them. What this repository owns is the
+# resolution -- which script runs, and what happens when none can be found --
+# the handful of properties scripts/task.sh actually depends on, and the rule
+# that a task without a budget is not a task.
+#
+# WHY THE REFUSALS ARE DRIVEN AND NOT READ. A refusal nobody executes has
+# never been shown to happen. Both of them are here: core absent, and core
+# present but answering the wrong API version.
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-B="$REPO/scripts/output-budget.sh"
+RESOLVE="$REPO/scripts/resolve-output-budget.sh"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 pass=0; fail=0
@@ -21,72 +26,139 @@ ok()  { pass=$((pass + 1)); printf '  ok    %s\n' "$1"; }
 bad() { fail=$((fail + 1)); printf '  FAIL  %s\n' "$1"; }
 check_eq() { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1', want '$2')"; }
 check_contains() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (output: ${1//$'\n'/ | })" ;; esac; }
+check_missing() { case "$1" in *"$2"*) bad "$3" ;; *) ok "$3" ;; esac; }
 
-run() { # run <log-name> <args...> -- sets $out and $rc
-    local log="$work/$1"; shift
-    out="$("$B" --log "$log" "$@" 2>&1)"; rc=$?
+# A stand-in for core's script: it answers --version and nothing else. The
+# point of these is the resolver's decision, not the wrapper's behaviour.
+stub_core() { # stub_core DIR VERSION-LINE
+    mkdir -p "$1/scripts"
+    {
+        echo '#!/usr/bin/env bash'
+        printf 'if [ "${1:-}" = --version ]; then echo "%s"; exit 0; fi\n' "$2"
+        echo 'echo "stub core wrapper ran: $*"'
+    } > "$1/scripts/output-budget.sh"
+    chmod +x "$1/scripts/output-budget.sh"
 }
 
-unset FWTH_VERBOSE
+unset OUTPUT_BUDGET_VERBOSE OUTPUT_BUDGET_FAIL_TAIL
 echo "output-budget.sh"
 
-# ---------------------------------------------------------------- within
-run a.log --max-lines 5 --label demo -- sh -c 'echo one; echo two'
-check_eq "$rc" 0 "a run inside its budget succeeds"
-check_contains "$out" "demo: ok (2 lines" "and says what it printed"
-check_contains "$out" "$work/a.log" "and names the log"
-case "$out" in *one*) bad "a passing run keeps its output off the terminal" ;; *) ok "a passing run keeps its output off the terminal" ;; esac
+# -------------------------------------------- there is no copy in this repo
+[ -e "$REPO/scripts/output-budget.sh" ] \
+    && bad "the wrapper is not committed here" \
+    || ok "the wrapper is not committed here"
 
-# ------------------------------------------------------------- over lines
-run b.log --max-lines 2 --label demo -- sh -c 'for i in 1 2 3 4; do echo "line$i"; done'
-check_eq "$rc" 65 "a passing run over its line budget exits 65"
-check_contains "$out" "printed 4 lines (budget 2)" "and says by how much"
-check_eq "$(wc -l < "$work/b.log" | tr -d ' ')" 4 "while the log still holds everything"
+# The rename that the old copy's drift was hiding. The canonical script does
+# not read the old name -- it reports it and carries on quiet -- so a file
+# still setting it would silently do nothing. Only uses count, not prose: the
+# name is assembled here so this file is not its own counter-example, and
+# CHANGELOG.md is exempt because its released entries record what those
+# versions did and rewriting them would be a different kind of lie.
+needle="FWTH""_VERBOSE"
+if ! git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1; then
+    bad "the old-name check needs a git checkout; there is no repository at $REPO"
+else
+    stale="$(git -C "$REPO" grep -InE "[\${}]$needle|$needle=" -- . ':!CHANGELOG.md')"
+    [ -z "$stale" ] \
+        && ok "no file still sets or reads the superseded verbose variable" \
+        || bad "no file still sets or reads the superseded verbose variable (${stale//$'\n'/ | })"
+fi
 
-# ------------------------------------------------------------- over bytes
-run c.log --max-bytes 4 --label demo -- sh -c 'echo 12345678'
-check_eq "$rc" 65 "a byte budget is enforced too"
+# ------------------------------------------------- FS_CORE_ROOT, and refusals
+stub_core "$work/good" "rust-fs-core-output-budget 1"
+out="$(FS_CORE_ROOT="$work/good" "$RESOLVE" 2>&1)"; rc=$?
+check_eq "$rc" 0 "FS_CORE_ROOT with a valid wrapper resolves"
+check_eq "$out" "$work/good/scripts/output-budget.sh" "and prints just the path"
 
-# ------------------------------------------------- a failure is not a budget
-# The command's status must escape unchanged, and the tail must be shown: a
-# failing run that printed only the budget complaint would be worse than no
-# budget at all.
-run d.log --max-lines 1 --tail 2 --label demo -- sh -c 'echo noise; echo "the real error"; exit 3'
-check_eq "$rc" 3 "a failing command exits with ITS status, not the budget's"
-check_contains "$out" "the real error" "and its tail is shown"
-case "$out" in
-    *"budget"*) bad "a failure does not complain about the budget" ;;
-    *) ok "a failure does not complain about the budget" ;;
-esac
+mkdir -p "$work/empty"
+out="$(FS_CORE_ROOT="$work/empty" "$RESOLVE" 2>&1)"; rc=$?
+check_eq "$rc" 1 "an FS_CORE_ROOT with no wrapper is refused"
+check_contains "$out" "FS_CORE_ROOT names '$work/empty'" "and the refusal names the path it was given"
+check_contains "$out" "chore siblings" "and names what would provide it"
 
-# ------------------------------------------------------------------ verbose
-run e.log --label demo --verbose -- sh -c 'echo streamed'
-check_eq "$rc" 0 "verbose succeeds"
-check_contains "$out" "streamed" "and streams the output"
-check_eq "$(cat "$work/e.log")" "streamed" "while still writing the log"
+stub_core "$work/wrong" "rust-fs-core-output-budget 99"
+out="$(FS_CORE_ROOT="$work/wrong" "$RESOLVE" 2>&1)"; rc=$?
+check_eq "$rc" 1 "a wrapper answering another API version is refused"
+check_contains "$out" "rust-fs-core-output-budget 1" "and says which version was expected"
+check_contains "$out" "rust-fs-core-output-budget 99" "and which one it found"
 
-run f.log --label demo --verbose -- sh -c 'echo oops; exit 7'
-check_eq "$rc" 7 "verbose reports the command's status, not tee's"
+stub_core "$work/noversion" ""
+printf '#!/usr/bin/env bash\necho hello\n' > "$work/noversion/scripts/output-budget.sh"
+out="$(FS_CORE_ROOT="$work/noversion" "$RESOLVE" 2>&1)"; rc=$?
+check_eq "$rc" 1 "a wrapper with no --version at all is refused"
 
-out="$(FWTH_VERBOSE=1 "$B" --log "$work/g.log" --max-lines 1 --label demo -- sh -c 'echo a; echo b' 2>&1)"; rc=$?
-check_eq "$rc" 65 "FWTH_VERBOSE streams but does not exempt a run from its budget"
-check_contains "$out" "a" "and FWTH_VERBOSE does stream"
+# ------------------------------------------ the sibling, and no fallback off it
+# A checkout with a good core beside it. The resolver finds it with no
+# FS_CORE_ROOT set -- and a bad FS_CORE_ROOT still fails rather than quietly
+# using it, which is what "authoritative" has to mean for CI to be trusted.
+mkdir -p "$work/tree/harness/scripts"
+cp "$RESOLVE" "$work/tree/harness/scripts/"
+stub_core "$work/tree/rust-fs-core" "rust-fs-core-output-budget 1"
 
-# ------------------------------------------------------------------ misuse
-out="$("$B" --max-lines 1 -- true 2>&1)"; rc=$?
-check_eq "$rc" 2 "a missing --log is refused"
-out="$("$B" --log "$work/h.log" 2>&1)"; rc=$?
-check_eq "$rc" 2 "a missing command is refused"
+out="$(cd "$work/tree/harness" && env -u FS_CORE_ROOT bash scripts/resolve-output-budget.sh 2>&1)"; rc=$?
+check_eq "$rc" 0 "a sibling rust-fs-core is found with no FS_CORE_ROOT set"
+check_contains "$out" "$work/tree/rust-fs-core/scripts/output-budget.sh" "and it is the sibling that is used"
 
-# ------------------------------------------------------- no budget, no limit
-run i.log --label demo -- sh -c 'i=0; while [ $i -lt 200 ]; do echo "$i"; i=$((i+1)); done'
-check_eq "$rc" 0 "without a budget a long run is allowed"
+out="$(cd "$work/tree/harness" && FS_CORE_ROOT="$work/empty" bash scripts/resolve-output-budget.sh 2>&1)"; rc=$?
+check_eq "$rc" 1 "FS_CORE_ROOT is authoritative: a bad one does not fall back to a good sibling"
+check_missing "$out" "$work/tree/rust-fs-core" "and the sibling is not silently substituted"
+
+out="$(cd "$work/tree/harness" && env -u FS_CORE_ROOT bash scripts/resolve-output-budget.sh --core-dir 2>&1)"; rc=$?
+check_eq "$out" "$work/tree/rust-fs-core" "--core-dir says where core is, for scripts/siblings.sh"
+
+# ------------------------------------------------ this checkout's real core
+# Not a stub: the core this repository's tasks will actually run. If it is
+# absent the suite FAILS -- there is nothing here to skip, because a harness
+# that cannot resolve its wrapper cannot run a budgeted task at all.
+real="$("$RESOLVE" 2>&1)"; rc=$?
+if [ "$rc" != 0 ]; then
+    bad "this checkout resolves a real rust-fs-core (run 'chore siblings', or set FS_CORE_ROOT)"
+    printf '%s\n' "$real"
+    printf '\n%d passed, %d failed\n' "$pass" "$((fail + 1))"
+    exit 1
+fi
+ok "this checkout resolves a real rust-fs-core"
+check_eq "$(bash "$real" --version)" "rust-fs-core-output-budget 1" "and it speaks the pinned API version"
+
+# ------------------------------- the four properties scripts/task.sh relies on
+out="$("$REPO/scripts/task.sh" selftest selftest 50 4000 -- sh -c 'echo kumquat; echo two' 2>&1)"; rc=$?
+check_eq "$rc" 0 "a task inside its budget succeeds"
+check_contains "$out" "selftest: ok (2 lines" "and prints a verdict saying what it printed"
+check_missing "$out" "kumquat" "and keeps the run itself off the terminal"
+
+out="$("$REPO/scripts/task.sh" selftest selftest 1 4000 -- sh -c 'echo a; echo b' 2>&1)"; rc=$?
+check_eq "$rc" 65 "a task that passed but printed too much exits 65"
+
+out="$("$REPO/scripts/task.sh" selftest selftest 50 4000 -- sh -c 'echo the real error; exit 3' 2>&1)"; rc=$?
+check_eq "$rc" 3 "a failing command exits with ITS status, not the wrapper's"
+check_missing "$out" "the real error" "and a failure is quiet by default, naming the log instead"
+out="$(OUTPUT_BUDGET_FAIL_TAIL=5 "$REPO/scripts/task.sh" selftest selftest 50 4000 -- sh -c 'echo the real error; exit 3' 2>&1)"
+check_contains "$out" "the real error" "while OUTPUT_BUDGET_FAIL_TAIL brings the tail back"
+
+out="$(CLI_ARGS=' --verbose ' "$REPO/scripts/task.sh" selftest selftest 50 4000 -- sh -c 'echo streamed' 2>&1)"; rc=$?
+check_eq "$rc" 0 "chore <task> -- --verbose succeeds"
+check_contains "$out" "streamed" "and streams the run (the variable is OUTPUT_BUDGET_VERBOSE now)"
+
+# ------------------------------------- no core, no task: the refusal is loud
+# The one that matters most: without the wrapper a task must NOT run its
+# command unbudgeted. The marker file proves the command never started.
+out="$(FS_CORE_ROOT="$work/empty" "$REPO/scripts/task.sh" selftest selftest 50 4000 \
+    -- sh -c "touch '$work/ran-anyway'" 2>&1)"; rc=$?
+[ "$rc" != 0 ] && ok "a task with no resolvable wrapper fails" || bad "a task with no resolvable wrapper fails"
+[ -e "$work/ran-anyway" ] \
+    && bad "and does not run the command unbudgeted" \
+    || ok "and does not run the command unbudgeted"
+check_contains "$out" "FS_CORE_ROOT" "and says what was missing"
 
 # ------------------------------------------------ every task is budgeted
 # The rule, checked against this repository's own chores.yml: each task that
-# runs a suite goes through output-budget.sh with two non-zero budgets. A task
+# runs a suite goes through scripts/task.sh with two non-zero budgets. A task
 # added later without one is exactly how "quiet" rots, so it fails here.
-for task in lint test state-machine config smoke; do
+#
+# `siblings` is not in the list and cannot be: it is the task that fetches the
+# wrapper, so budgeting it through the wrapper would be a task that can only
+# run once it has already run. It prints one line of git plumbing.
+for task in lint test state-machine config output-budget smoke; do
     block="$(awk -v t="  $task:" '
         $0 == t { inside = 1; next }
         inside && /^  [a-z][a-z:_-]*:$/ { inside = 0 }
@@ -94,7 +166,7 @@ for task in lint test state-machine config smoke; do
     ' "$REPO/chores.yml")"
     if [ -z "$block" ]; then bad "chores.yml has a '$task' task"; continue; fi
     # scripts/task.sh LABEL LOG MAX-LINES MAX-BYTES: a zero in either budget
-    # is "no budget" to output-budget.sh, which is the shape refused here.
+    # is "no budget" to the wrapper, which is the shape refused here.
     if printf '%s\n' "$block" | grep -Eq 'scripts/task\.sh +[^ ]+ +[^ ]+ +[1-9][0-9]* +[1-9][0-9]*'; then
         ok "chore $task runs under a line and a byte budget"
     else
