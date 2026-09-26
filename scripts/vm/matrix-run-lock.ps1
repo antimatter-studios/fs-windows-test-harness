@@ -74,8 +74,8 @@ elseif (-not (Test-Path -LiteralPath $Workdir -PathType Container)) {
     Reject-Owner 'workdir is missing'
 }
 
-function Open-Gate($path) {
-    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+function Open-Gate($path, [int]$waitSeconds = 15) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($waitSeconds)
     while ($true) {
         try {
             return [IO.File]::Open($path, [IO.FileMode]::OpenOrCreate,
@@ -93,7 +93,9 @@ function Open-Gate($path) {
 $operationGate = $null
 $gate = $null
 if ($Action -in @('Acquire', 'Invoke', 'Release')) {
-    $operationGate = Open-Gate $operationGatePath
+    # Another scenario may hold this gate for an entire chkdsk or image
+    # operation. Keep the short timeout only for the metadata gate.
+    $operationGate = Open-Gate $operationGatePath $LeaseSeconds
 }
 $gate = Open-Gate $gatePath
 

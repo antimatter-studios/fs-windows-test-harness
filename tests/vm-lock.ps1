@@ -80,6 +80,33 @@ try {
     Assert-True ($invoke.ExitCode -eq 0) 'live owner can mutate under the gate'
     Assert-True ((Get-Content -LiteralPath $marker -Raw).Trim() -eq 'owned') 'guarded command ran'
 
+    # A second scenario must wait through a long VM command. The old 15-second
+    # operation-gate deadline rejected it even though both shared one owner.
+    $started = Join-Path $workdir 'long-operation-started.txt'
+    $holder = Start-Job -ScriptBlock {
+        param($Script, $Dir, $Marker)
+        & powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+            -File $Script -Action Invoke -Workdir $Dir -RunId 'run-a' `
+            -OwnerHost 'test-host' -OwnerPid '99999999' -OwnerToken 'token-a' `
+            -LeaseSeconds 60 -Command "Set-Content -LiteralPath '$Marker' -Value ready; Start-Sleep -Seconds 17" *> $null
+        $LASTEXITCODE
+    } -ArgumentList $lockScript, $workdir, $started
+    try {
+        $deadline = [DateTime]::UtcNow.AddSeconds(10)
+        while (-not (Test-Path -LiteralPath $started) -and [DateTime]::UtcNow -lt $deadline) {
+            Start-Sleep -Milliseconds 100
+        }
+        Assert-True (Test-Path -LiteralPath $started) 'the first command holds the operation gate'
+        $waiting = Invoke-Lock Invoke 'run-a' 'token-a' "Set-Content -LiteralPath '$marker' -Value waited" -LeaseSeconds 60
+        Assert-True ($waiting.ExitCode -eq 0) "second command waits beyond 15 seconds: $($waiting.Output)"
+        Assert-True ((Get-Content -LiteralPath $marker -Raw).Trim() -eq 'waited') 'waiting command ran after gate release'
+    }
+    finally {
+        $holderResult = @($holder | Wait-Job | Receive-Job)
+        $holder | Remove-Job
+    }
+    Assert-True ($holderResult.Count -eq 1 -and $holderResult[0] -eq 0) 'first long command completed'
+
     $wrongRelease = Invoke-Lock Release 'run-b' 'token-b'
     Assert-True ($wrongRelease.ExitCode -eq 74) 'a non-owner cannot release the lock'
     Assert-True (Test-Path -LiteralPath $ownerPath -PathType Leaf) 'failed release preserves the lock'
