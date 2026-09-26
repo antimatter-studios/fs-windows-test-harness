@@ -176,8 +176,12 @@ whose volumes are tar images:
 
 1. **bootstrap and preflight** -- `.test-env` is written from flags, and
    the SSH preflight trusts the new host key itself;
-2. **ship** -- harness and consumer VM scripts go to the VM workdir;
-3. **`smoke-rw-roundtrip`** -- the host creates an image and ships it to
+2. **exclusive VM-workdir lease** -- a live `run-tests.sh` renews its lock
+   while it runs; an expired lock can be reclaimed, and an old owner cannot
+   mutate the VM or release its replacement. CI exercises contention,
+   recovery, fencing, and a short lease in the end-to-end smoke run;
+3. **ship** -- harness and consumer VM scripts go to the VM workdir;
+4. **`smoke-rw-roundtrip`** -- the host creates an image and ships it to
    the VM; each VM step mounts it through memfs on a drive letter
    (ready-line matched), runs one of the harness's op scripts (list, read
    with content/size/sha256 checks, mkdir, write, rename, unlink, rmdir)
@@ -188,7 +192,7 @@ whose volumes are tar images:
    `recipe.json`, `results.json`, `run-manifest.json` and each step's
    `step.json` / `stdout.txt` / `stderr.txt` present, and each op's output
    proving it acted on the drive;
-4. **`canary-wrong-content`** -- expected to fail: it reads a file back
+5. **`canary-wrong-content`** -- expected to fail: it reads a file back
    with the wrong expected content. `run-tests.sh` must exit non-zero and
    the harness must report `failed` at that step, with the verifier's
    `content mismatch`. A harness that cannot go red proves nothing when
@@ -198,6 +202,14 @@ memfs keeps volumes in memory, so
 [`memfs-mount.ps1`](./tests/smoke-consumer/scripts/fs-windows-test-harness/memfs-mount.ps1)
 loads the tar image into the drive on mount and writes changes back to
 it while mounted -- the image I/O a real driver does itself.
+
+The VM lease defaults to 30 minutes with a 60-second heartbeat. The full
+matrix takes 3–4 hours, while a normal scenario is about 5–8 minutes; the
+lease leaves room for a slow step or a brief SSH outage without blocking
+crash recovery for the entire matrix duration. Set
+`FSWTH_VM_LEASE_SECONDS` and `FSWTH_VM_HEARTBEAT_SECONDS` to tune it; the
+heartbeat must be at most one third of the lease. The PID in diagnostics is
+the orchestrator's PID and is never used as a Windows liveness check.
 
 ## License
 

@@ -79,6 +79,12 @@
 # set contains at least one vm-step recipe. Pure host-side runs skip
 # the probe — they don't need the VM.
 #
+# VM exclusivity: after preflight, a VM-side run atomically claims a lock
+# directory inside VM_WORKDIR before reinstall, ship, or scenario work. A
+# live run renews its lease every minute; an expired one can be recovered.
+# Every VM mutation checks the owner token; guarded commands prevent a
+# replacement from taking over until the command finishes.
+#
 # Output:
 #   stdout: per-scenario PASS/FAIL from libtest-mimic + per-step diag
 #           when failures occur
@@ -107,6 +113,8 @@ ARG_VM_HOST=""
 ARG_VM_WORKDIR=""
 ARG_VM_IMAGE_DIR=""
 ARG_SSH_KEY=""
+WRAPPER_TMP=""
+VM_LOCK_HELD=0
 
 usage() {
     awk '
@@ -186,10 +194,16 @@ fi
 # need the VM. Pure host-side recipes don't.
 NEEDS_VM=0
 if [[ -f "${matrix_full}" ]]; then
-    NEEDS_VM=$(python3 - "${matrix_full}" "${SCENARIO}" <<'PYEOF'
+    NEEDS_VM=$(python3 - "${matrix_full}" "${SCENARIO}" "${harness_toml}" <<'PYEOF'
 import json, sys
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib
 m = json.load(open(sys.argv[1]))
 pat = sys.argv[2]
+with open(sys.argv[3], 'rb') as f:
+    ops = tomllib.load(f).get('ops', {})
 needs_vm = False
 for name, s in m.get("scenarios", {}).items():
     if not isinstance(s, dict): continue
@@ -197,10 +211,13 @@ for name, s in m.get("scenarios", {}).items():
     for step in s.get("recipe", []):
         if not isinstance(step, dict): continue
         op = step.get("op") or step.get("type") or ""
-        # Built-in ship ops imply VM. Per-step host override = vm.
+        # Built-in ship ops imply VM. Otherwise match the runner's host
+        # resolution: step override, then op host (default vm).
         if op in ("ship-to-vm", "ship-to-host"):
             needs_vm = True; break
-        if step.get("host") == "vm":
+        op_def = ops.get(op, {})
+        op_host = op_def.get('host', 'vm') if isinstance(op_def, dict) else 'vm'
+        if step.get('host') == 'vm' or (step.get('host') != 'host' and op_host == 'vm'):
             needs_vm = True; break
     if needs_vm: break
 print("1" if needs_vm else "0")
@@ -404,6 +421,154 @@ if [[ "${NEEDS_VM}" == "1" ]]; then
         exit 2
     fi
 
+    # ── VM-workdir lock: flat scenario images require exclusivity ────
+    # The consumer's VM-side image names are scoped only by scenario, and
+    # cleanup may sweep every image in VM_WORKDIR. Claim the workdir before
+    # reinstall/ship/run so two independent matrix processes cannot overwrite
+    # or delete each other's images. The PowerShell helper is streamed over
+    # SSH, so acquiring the lock does not itself depend on a prior ship phase.
+    VM_LOCK_RUN_ID="$(python3 -c 'import time; print(time.time_ns())')"
+    VM_LOCK_OWNER_HOST="$(hostname 2>/dev/null || printf unknown)"
+    VM_LOCK_OWNER_PID="$$"
+    VM_LOCK_OWNER_TOKEN="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+    VM_LOCK_LEASE_SECONDS="${FSWTH_VM_LEASE_SECONDS:-1800}"
+    VM_LOCK_HEARTBEAT_SECONDS="${FSWTH_VM_HEARTBEAT_SECONDS:-60}"
+    if ! [[ "${VM_LOCK_LEASE_SECONDS}" =~ ^[1-9][0-9]{0,4}$ \
+        && "${VM_LOCK_HEARTBEAT_SECONDS}" =~ ^[1-9][0-9]{0,4}$ ]] \
+        || (( VM_LOCK_LEASE_SECONDS < 3 || VM_LOCK_LEASE_SECONDS > 86400 \
+              || VM_LOCK_HEARTBEAT_SECONDS < 1 \
+              || VM_LOCK_HEARTBEAT_SECONDS * 3 > VM_LOCK_LEASE_SECONDS )); then
+        echo '[run-tests] invalid VM lease timing: require 3..86400 seconds and heartbeat <= lease/3' >&2
+        exit 2
+    fi
+    VM_LOCK_HELPER_PATH="${VM_WORKDIR%/}/.fswth-matrix.lock/${VM_LOCK_OWNER_TOKEN}/matrix-run-lock.ps1"
+    export FSWTH_VM_LOCK_SCRIPT="${VM_LOCK_HELPER_PATH}" FSWTH_VM_LOCK_WORKDIR="${VM_WORKDIR}"
+    export FSWTH_VM_LOCK_RUN_ID="${VM_LOCK_RUN_ID}" FSWTH_VM_LOCK_TOKEN="${VM_LOCK_OWNER_TOKEN}"
+    export FSWTH_VM_LOCK_HOST="${VM_LOCK_OWNER_HOST}" FSWTH_VM_LOCK_PID="${VM_LOCK_OWNER_PID}"
+
+    vm_lock_encoded_command() {
+        local action="$1" command="${2:-}"
+        python3 - "${action}" "${VM_WORKDIR}" "${VM_LOCK_RUN_ID}" \
+            "${VM_LOCK_OWNER_HOST}" "${VM_LOCK_OWNER_PID}" \
+            "${VM_LOCK_OWNER_TOKEN}" "${VM_LOCK_LEASE_SECONDS}" \
+            "${VM_LOCK_HELPER_PATH}" "${command}" <<'PYEOF'
+import base64
+import json
+import sys
+
+keys = ("action", "workdir", "run_id", "owner_host", "owner_pid", "owner_token",
+        "lease_seconds", "helper_path", "command")
+params = dict(zip(keys, sys.argv[1:]))
+params_b64 = base64.b64encode(json.dumps(params).encode("utf-8")).decode("ascii")
+command = rf'''
+$paramsJson = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{params_b64}'))
+$params = $paramsJson | ConvertFrom-Json
+if ($params.action -eq 'Invoke') {{
+    $script = $params.helper_path
+}} else {{
+    $script = [ScriptBlock]::Create([Console]::In.ReadToEnd())
+}}
+& $script `
+    -Action $params.action `
+    -Workdir $params.workdir `
+    -RunId $params.run_id `
+    -OwnerHost $params.owner_host `
+    -OwnerPid $params.owner_pid `
+    -OwnerToken $params.owner_token `
+    -LeaseSeconds ([int]$params.lease_seconds) `
+    -Command $params.command
+if (-not $?) {{ exit 1 }}
+'''
+print(base64.b64encode(command.encode("utf-16le")).decode("ascii"))
+PYEOF
+    }
+
+    vm_lock_remote() {
+        local action="$1" encoded
+        encoded="$(vm_lock_encoded_command "${action}")"
+        # shellcheck disable=SC2086,SC2029
+        ssh ${SSH_OPTS:-} "${VM_HOST}" \
+            "powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${encoded}" \
+            < "${harness_root}/scripts/vm/matrix-run-lock.ps1"
+    }
+
+    vm_lock_invoke() {
+        local encoded
+        encoded="$(vm_lock_encoded_command Invoke "$1")"
+        # stdin remains available to commands such as tar -xf -.
+        # shellcheck disable=SC2086,SC2029
+        ssh ${SSH_OPTS:-} "${VM_HOST}" \
+            "powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${encoded}"
+    }
+
+    vm_lock_ship_file() {
+        local src="$1" dest="$2" staged dest_dir
+        staged="${VM_WORKDIR%/}/.fswth-matrix.lock/${VM_LOCK_OWNER_TOKEN}/$(basename "${dest}")"
+        dest_dir="$(dirname "${dest}")"
+        vm_lock_remote Verify
+        # The upload only touches an owner-scoped staging path. If this
+        # owner expires during scp, the guarded move below rejects it.
+        # shellcheck disable=SC2086
+        scp ${SSH_OPTS:-} "${src}" "${VM_HOST}:${staged}"
+        vm_lock_invoke "New-Item -ItemType Directory -Path '${dest_dir//\'/\'\'}' -Force | Out-Null; Move-Item -LiteralPath '${staged//\'/\'\'}' -Destination '${dest//\'/\'\'}' -Force"
+    }
+
+    cleanup_run() {
+        local run_rc=$? release_rc=0
+        trap - EXIT USR1
+        set +e
+        if [[ -n "${VM_LOCK_HEARTBEAT_PID:-}" ]]; then
+            kill "${VM_LOCK_HEARTBEAT_PID}" 2>/dev/null || true
+            wait "${VM_LOCK_HEARTBEAT_PID}" 2>/dev/null || true
+        fi
+        if [[ "${VM_LOCK_HELD}" == "1" ]]; then
+            vm_lock_remote Release
+            release_rc=$?
+            if [[ "${release_rc}" -ne 0 ]]; then
+                echo "[run-tests] failed to release VM matrix lock (rc=${release_rc})" >&2
+                [[ "${run_rc}" -eq 0 ]] && run_rc="${release_rc}"
+            fi
+        fi
+        [[ -n "${WRAPPER_TMP}" ]] && rm -f "${WRAPPER_TMP}"
+        exit "${run_rc}"
+    }
+
+    set +e
+    VM_LOCK_OUTPUT="$(vm_lock_remote Acquire 2>&1)"
+    VM_LOCK_RC=$?
+    set -e
+    [[ -n "${VM_LOCK_OUTPUT}" ]] && printf '%s\n' "${VM_LOCK_OUTPUT}"
+    if [[ "${VM_LOCK_RC}" -ne 0 ]]; then
+        exit "${VM_LOCK_RC}"
+    fi
+    VM_LOCK_HELD=1
+    trap cleanup_run EXIT
+    VM_LOCK_HEARTBEAT_LOG="${consumer_root}/test-diagnostics/vm-lease-heartbeat.log"
+    mkdir -p "$(dirname "${VM_LOCK_HEARTBEAT_LOG}")"
+    : > "${VM_LOCK_HEARTBEAT_LOG}"
+    trap 'echo "[run-tests] VM lease renewal failed; see ${VM_LOCK_HEARTBEAT_LOG}" >&2; exit 74' USR1
+    # Use the orchestrator PID only for signalling this local process. It is
+    # never consulted by the VM when deciding whether to reclaim a lease.
+    VM_LOCK_PARENT_PID="${BASHPID}"
+    (
+        while sleep "${VM_LOCK_HEARTBEAT_SECONDS}"; do
+            if ! vm_lock_remote Renew >/dev/null; then
+                kill -USR1 "${VM_LOCK_PARENT_PID}" 2>/dev/null || true
+                break
+            fi
+        done
+    # A remote SSH child may outlive this subshell after cleanup kills it.
+    # Keep its stderr off the caller's pipe so tee can observe EOF.
+    ) > "${VM_LOCK_HEARTBEAT_LOG}" 2>&1 &
+    VM_LOCK_HEARTBEAT_PID=$!
+    vm_lock_remote Verify
+    # The runner's VM commands invoke this token-scoped copy under the
+    # Windows operation gate. Its path disappears on release/recovery.
+    # shellcheck disable=SC2086
+    scp ${SSH_OPTS:-} "${harness_root}/scripts/vm/matrix-run-lock.ps1" \
+        "${VM_HOST}:${VM_LOCK_HELPER_PATH}"
+    vm_lock_remote Verify
+
     # ── --reinstall: scp setup-windows-vm.ps1 + ssh-invoke ──────
     # Nuclear bootstrap: uninstall+reinstall every package declared
     # in [vm.packages] (with their custom_args), reset rustup default
@@ -418,8 +583,6 @@ if [[ "${NEEDS_VM}" == "1" ]]; then
         # quoting eat single-quoted PS literals; baking into a file
         # localises the escaping to the python heredoc here).
         WRAPPER_TMP=$(mktemp -t reinstall-wrapper.XXXXXX)
-        # shellcheck disable=SC2064
-        trap "rm -f '${WRAPPER_TMP}'" EXIT
 
         PACKAGES_PS=$(python3 - "${harness_toml}" <<'PYEOF'
 import sys, json
@@ -465,15 +628,12 @@ PYEOF
         # Ensure VM workdir exists, then scp setup-windows-vm.ps1 +
         # the wrapper + invoke.
         # shellcheck disable=SC2086,SC2029
-        ssh ${SSH_OPTS:-} "${VM_HOST}" "if (-not (Test-Path '${VM_WORKDIR_PS}')) { New-Item -ItemType Directory -Path '${VM_WORKDIR_PS}' -Force | Out-Null }"
-        # shellcheck disable=SC2086
-        scp ${SSH_OPTS:-} "${harness_root}/scripts/setup-windows-vm.ps1" "${VM_HOST}:${VM_WORKDIR}/setup-windows-vm.ps1"
-        # shellcheck disable=SC2086
-        scp ${SSH_OPTS:-} "${WRAPPER_TMP}" "${VM_HOST}:${VM_WORKDIR}/reinstall-wrapper.ps1"
+        vm_lock_ship_file "${harness_root}/scripts/setup-windows-vm.ps1" "${VM_WORKDIR}/setup-windows-vm.ps1"
+        vm_lock_ship_file "${WRAPPER_TMP}" "${VM_WORKDIR}/reinstall-wrapper.ps1"
 
         echo "[reinstall] invoking setup-windows-vm.ps1 -Reinstall on ${VM_HOST}"
         # shellcheck disable=SC2086,SC2029
-        ssh ${SSH_OPTS:-} "${VM_HOST}" "powershell -ExecutionPolicy Bypass -File '${VM_WORKDIR_PS}\\reinstall-wrapper.ps1'"
+        vm_lock_invoke "powershell -ExecutionPolicy Bypass -File '${VM_WORKDIR_PS}\\reinstall-wrapper.ps1'"
         REINSTALL_RC=$?
         if [[ "${REINSTALL_RC}" -ne 0 ]]; then
             echo "[reinstall] setup-windows-vm.ps1 failed (rc=${REINSTALL_RC})" >&2
@@ -487,25 +647,18 @@ PYEOF
     if [[ "${DO_SHIP}" == "1" ]]; then
         VM_WORKDIR_PS="${VM_WORKDIR//\//\\}"
         ssh_run() {
-            # shellcheck disable=SC2086,SC2029
-            ssh ${SSH_OPTS:-} "${VM_HOST}" "$@"
+            vm_lock_invoke "$*"
         }
         ship_dir() {
             # ship_dir <local-src> <vm-dest> — tar-pipe a directory tree.
             local src="$1" dest="$2"
             local dest_ps="${dest//\//\\}"
             ssh_run "if (-not (Test-Path '${dest_ps}')) { New-Item -ItemType Directory -Path '${dest_ps}' -Force | Out-Null }"
-            # shellcheck disable=SC2086
-            tar -C "${src}" -cf - . | ssh ${SSH_OPTS:-} "${VM_HOST}" "tar -xf - -C '${dest}'"
+            tar -C "${src}" -cf - . | vm_lock_invoke "tar -xf - -C '${dest}'"
         }
         ship_file() {
             # ship_file <local-src> <vm-dest> — single-file scp.
-            local src="$1" dest="$2"
-            local dest_dir; dest_dir="$(dirname "${dest}")"
-            local dest_dir_ps="${dest_dir//\//\\}"
-            ssh_run "if (-not (Test-Path '${dest_dir_ps}')) { New-Item -ItemType Directory -Path '${dest_dir_ps}' -Force | Out-Null }"
-            # shellcheck disable=SC2086
-            scp ${SSH_OPTS:-} "${src}" "${VM_HOST}:${dest}"
+            vm_lock_ship_file "$1" "$2"
         }
 
         # Harness scripts/vm/ -> the VM-side harness root the runner
@@ -542,7 +695,7 @@ PYEOF
                 --exclude='*.swp' --exclude='.DS_Store' \
                 --exclude='./.test-env' \
                 -C "${consumer_root}" -cf - . | \
-                ssh ${SSH_OPTS:-} "${VM_HOST}" "tar -xf - -C '${VM_WORKDIR}'"
+                vm_lock_invoke "tar -xf - -C '${VM_WORKDIR}'"
             echo "[vm-build] ${VM_BUILD_COMMAND}"
             ssh_run "Set-Location '${VM_WORKDIR_PS}'; ${VM_BUILD_COMMAND}"
         else

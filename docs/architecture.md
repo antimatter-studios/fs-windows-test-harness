@@ -109,10 +109,15 @@ tested and which op failed without re-running anything.
   The atomic-rename + read-back-verify pattern prevents two agents
   taking the same scenario.
 - **Per VM**: scenarios serialise via `MOUNT_LOCK` + `--test-threads=1`.
-- **Per agent session**: each agent SHOULD point `VM_WORKDIR` at a
-  session-namespaced directory so two concurrent extractions don't
-  trample each other on the same VM. The `run-tests.sh` first-run
-  bootstrap prompts for this.
+- **Per VM workdir**: `run-tests.sh` acquires a renewable lease before
+  reinstall, ship, or matrix work. A Windows file-share gate serializes
+  acquisition, renewal, and release. A second gate stays held across each
+  VM command, so recovery cannot overlap an in-flight mutation. Built-in
+  image transfers use owner-scoped staging and a guarded final move.
+  Missing or corrupt owner metadata is reclaimed only after the lock
+  directory itself has aged past the lease. The orchestrator PID is only
+  diagnostic; the VM never probes it. Separate workdirs remain useful for
+  running independent matrices at once.
 
 ## Re-entrancy
 
