@@ -39,7 +39,9 @@ the same shape worked verbatim for an NTFS prototype before it.
 
 ## Quickstart
 
-For a new consumer:
+For a new consumer. First, a Windows VM the Mac can reach over SSH at an
+address that does not move: [`docs/vm-setup.md`](./docs/vm-setup.md) takes it
+from an empty hypervisor to `ssh <user>@<vm> "echo ok"`.
 
 ```sh
 # 1. Check the harness out AS A SIBLING of your repo, not inside it.
@@ -62,6 +64,7 @@ $EDITOR fs-windows-test-harness.toml   # point [project.binary] at your driver, 
 bash ../fs-windows-test-harness/scripts/run-tests.sh
 ```
 
+Setting up the Windows VM: [`docs/vm-setup.md`](./docs/vm-setup.md).
 Full contract: [`docs/consumer-integration.md`](./docs/consumer-integration.md).
 Architecture overview: [`docs/architecture.md`](./docs/architecture.md).
 Diagnosing a red scenario: [`docs/triage-protocol.md`](./docs/triage-protocol.md).

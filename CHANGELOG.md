@@ -67,6 +67,17 @@ loosely follows Keep a Changelog; semver applies from `2.0.0` onward.
   cannot release a replacement owner's lock. This protects flat image names
   and broad image cleanup across crashed and concurrent runs.
 
+### Added
+
+- **`docs/vm-setup.md`: setting up the Windows VM**, from an empty
+  hypervisor to SSH answering. It covers a host-only network with a static
+  guest address (the NAT address moves, and `known_hosts` and `VM_HOST`
+  break with it); the Private firewall profile that address needs before
+  sshd will answer on it; OpenSSH server and where an administrator's key
+  goes; VMware Fusion's encrypted VM and `vmrun -vp`; running headless;
+  and what a VM that is catching up on Windows Update looks like. Linked
+  from the README Quickstart and from `docs/consumer-integration.md`.
+
 ### Changed
 
 - **A scenario must pass on its first attempt.** The runner no longer retries
