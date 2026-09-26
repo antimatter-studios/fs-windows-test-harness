@@ -102,6 +102,27 @@ try {
     Assert-True ($afterLong.ExitCode -eq 0) "long command preserves its lease: $($afterLong.Output)"
     Assert-True ((Invoke-Lock Release 'long-run' 'long-token' -LeaseSeconds 3).ExitCode -eq 0) 'long command owner releases'
 
+    # Parallel scenarios of one run each go through Invoke. A command that
+    # outlasts the gate's 15-second wait must not fail its siblings.
+    Assert-True ((Invoke-Lock Acquire 'par-run' 'par-token').ExitCode -eq 0) 'parallel fixture acquires'
+    $slow = Start-Job -ScriptBlock {
+        param($Script, $Dir)
+        & powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+            -File $Script -Action Invoke -Workdir $Dir -RunId 'par-run' `
+            -OwnerHost test-host -OwnerPid 99999999 -OwnerToken 'par-token' `
+            -LeaseSeconds 300 -Command 'Start-Sleep -Seconds 20' *> $null
+        $LASTEXITCODE
+    } -ArgumentList $lockScript, $workdir
+    Start-Sleep -Seconds 3
+    $sibling = Invoke-Lock Invoke 'par-run' 'par-token' '$null = 0'
+    $slowStillRunning = $slow.State -eq 'Running'
+    $slowExit = @($slow | Wait-Job | Receive-Job)
+    $slow | Remove-Job
+    Assert-True ($sibling.ExitCode -eq 0) "a sibling command runs beside a long one: $($sibling.Output)"
+    Assert-True $slowStillRunning 'the sibling finished while the long command was still running'
+    Assert-True ($slowExit[-1] -eq 0) 'the long command completes'
+    Assert-True ((Invoke-Lock Release 'par-run' 'par-token').ExitCode -eq 0) 'parallel owner releases'
+
     # Expiry uses the VM clock, not the reported orchestrator PID.
     $old = Invoke-Lock Acquire 'stale' 'stale-token'
     Assert-True ($old.ExitCode -eq 0) 'stale fixture acquires'
