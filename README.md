@@ -75,10 +75,12 @@ Every CI job has a local equivalent in [`chores.yml`](./chores.yml)
 the same commands.
 
 ```sh
-chore check    # lint + test + state-machine + config: everything off Windows
+chore siblings # first: put ../rust-fs-core where the output budget is read from
+chore check    # lint + test + state-machine + output-budget + config: everything off Windows
 chore lint     # bash -n, shellcheck, cargo fmt --check, cargo clippy
 chore test     # runner unit tests
 chore state-machine
+chore output-budget  # the wrapper resolves from core, and every task is budgeted
 chore config   # needs python3 3.11+ and `pip install jsonschema`
 chore test -- --verbose   # any task: stream the whole run, not just the verdict
 
@@ -98,8 +100,8 @@ the terminal.
 | | Prints |
 | --- | --- |
 | **Pass** | `test: ok (52 lines, 2870 bytes) — …/tmp/logs/test.log` |
-| **Fail** | the same label with `FAILED (exit N)`, then the tail of the log — the failing test and its output, not the whole run |
-| **`--verbose` / `-v`, or `FWTH_VERBOSE=1`** | everything, streamed live: every test name, every matrix step, every guest command |
+| **Fail** | the same label with `FAILED (exit N)`, the log and how many lines are in it — and no tail, unless `OUTPUT_BUDGET_FAIL_TAIL=N` asks for one |
+| **`--verbose` / `-v`, or `OUTPUT_BUDGET_VERBOSE=1`** | everything, streamed live: every test name, every matrix step, every guest command |
 | **CI** | the quiet form, with the log uploaded as an artefact |
 
 Two reasons, and the second is the one people forget. A run that prints
@@ -113,16 +115,19 @@ scenario, and chkdsk's report for every image it checks. That is exactly what
 someone needs when a scenario fails, so it goes to the log — never to
 `/dev/null` — and the tail of it is what a failure prints.
 
-[`scripts/output-budget.sh`](./scripts/output-budget.sh) does this for any
-command: it runs it, writes everything to `--log`, prints one line on success,
-prints the tail on failure, and **exits 65 when a run passed but printed more
-than its budget** — a status you can tell apart from a failing suite.
-`--verbose` (or `FWTH_VERBOSE=1`) streams as well, and does not exempt a run
-from its budget. The command's own exit status is what escapes: `cmd | tee log`
-reports tee's, which is how a red suite reads green.
+The wrapper that does this is **[rust-fs-core](https://github.com/antimatter-studios/rust-fs-core)'s
+`scripts/output-budget.sh`**, and it is deliberately **not committed here**.
+It runs a command, writes everything to `--log`, prints one line on success,
+prints a verdict naming the log on failure, and **exits 65 when a run passed
+but printed more than its budget** — a status you can tell apart from a
+failing suite. `--verbose` (or `OUTPUT_BUDGET_VERBOSE=1`) streams as well, and
+does not exempt a run from its budget. The command's own exit status is what
+escapes: `cmd | tee log` reports tee's, which is how a red suite reads green.
+
+A consumer of this harness calls core's copy, not this repository's:
 
 ```sh
-../fs-windows-test-harness/scripts/output-budget.sh \
+../rust-fs-core/scripts/output-budget.sh \
     --log tmp/logs/matrix.log --max-lines 600 --max-bytes 60000 --label 'test:matrix' \
     -- scripts/run-matrix.sh
 ```
@@ -135,9 +140,32 @@ command in [`chores.yml`](./chores.yml), and
 [`tests/output-budget.sh`](./tests/output-budget.sh) fails any task that has
 none.
 
-The script is the same one [fs-linux-test-harness](https://github.com/antimatter-studios/fs-linux-test-harness)
-ships, so a consumer of either harness budgets its tiers the same way; only
-the environment variable's prefix differs.
+### Where the wrapper comes from
+
+One script, in one repository. This harness kept a copy of it until
+rust-fs-core#153, as did fs-linux-test-harness and several drivers, and the
+copies drifted: this one read `FWTH_VERBOSE`, the Linux harness's read
+`FLTH_VERBOSE`, and the canonical one reads `OUTPUT_BUDGET_VERBOSE` and
+reports either of the old names rather than silently ignoring it. Each
+repository was internally consistent and nothing compared them.
+
+So `scripts/output-budget.sh` is gone from here, and
+[`scripts/resolve-output-budget.sh`](./scripts/resolve-output-budget.sh)
+finds core's at run time — `$FS_CORE_ROOT` if it is set (authoritative, no
+fallback), otherwise a `rust-fs-core` sibling beside the main working tree.
+It verifies `--version` rather than a digest, because a digest pinned in
+several repositories is the lockstep this removes. A core that is missing, or
+present and answering a different API version, **fails the task loudly**
+rather than letting it run unbudgeted.
+
+`chore siblings` clones or advances that sibling; the pin, `FS_CORE_REF`, is
+in [`chores.yml`](./chores.yml) and is a floor, not a target — it never moves
+a shared core checkout backwards. CI has no sibling directory, so it clones
+core into the runner's temp directory and exports `FS_CORE_ROOT`.
+
+```sh
+chore siblings          # put ../rust-fs-core at or above the pinned ref
+```
 
 CI runs every task through the same budgeted wrapper, including the Windows
 `smoke` task. The full logs are uploaded as workflow artifacts under

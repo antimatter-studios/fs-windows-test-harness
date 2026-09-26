@@ -17,8 +17,14 @@ chore_min_version: 0.6.0
 #
 #   A task prints a VERDICT: one line saying it passed, how much it printed,
 #   and the log holding the run -- tmp/logs/<task>.log, kept in full. A
-#   failure prints the tail of that log. `chore <task> -- --verbose` (or
-#   FWTH_VERBOSE=1) streams the whole run as well.
+#   failure prints a verdict too -- its status, the log and the log's size --
+#   and no tail unless OUTPUT_BUDGET_FAIL_TAIL=N asks for one. `chore <task>
+#   -- --verbose` (or OUTPUT_BUDGET_VERBOSE=1) streams the whole run as well.
+#
+#   The wrapper behind all of this is rust-fs-core's scripts/output-budget.sh,
+#   resolved at run time by scripts/resolve-output-budget.sh and NOT committed
+#   here. `chore siblings` is what puts core where that script looks; without
+#   it every task below fails loudly rather than running unbudgeted.
 #
 #   Each task carries an OUTPUT BUDGET, lines and bytes, and a run that
 #   passed but printed more fails with status 65 -- told apart from a failing
@@ -30,13 +36,31 @@ chore_min_version: 0.6.0
 #     test              98 / 4,348     140 / 6,000   tests get added
 #     state-machine     34 / 1,634      50 / 2,400
 #     config             8 /   674      20 / 1,500
+#     output-budget     39 / 1,957    120 / 12,000   measured 2026-09-26
 #     smoke            348 / 42,000   500 / 60,000   end-to-end VM transcript
 #
 #   Raise one DELIBERATELY when a task grows. A budget nobody can breach
 #   measures nothing, and tests/output-budget.sh fails a task that has none.
 #   Why any of this: see the README, "Output: quiet by default".
 
+vars:
+  # The one sibling this repository has, and it supplies one file: the
+  # canonical output-budget wrapper. The pin is a FLOOR -- `chore siblings`
+  # never moves a core checkout backwards to satisfy it. v0.2.13 is the
+  # release whose wrapper answers `--version` with API 1 and keeps a failing
+  # run quiet; below v0.2.11 the file does not exist at all.
+  FS_CORE_URL: https://github.com/antimatter-studios/rust-fs-core.git
+  FS_CORE_REF: v0.2.13
+
 tasks:
+  siblings:
+    desc: Clone or advance ../rust-fs-core, which supplies the output-budget wrapper
+    env:
+      FS_CORE_URL: '{{.FS_CORE_URL}}'
+      FS_CORE_REF: '{{.FS_CORE_REF}}'
+    cmds:
+      - bash scripts/siblings.sh
+
   lint:
     desc: Shell syntax + shellcheck, cargo fmt + clippy (CI job `lint`)
     cmds:
@@ -64,14 +88,20 @@ tasks:
     cmds:
       - scripts/task.sh config config 20 1500 -- python3 tests/validate-configs.py
 
+  output-budget:
+    desc: The wrapper resolves from core, and every task is budgeted (CI job `state-machine`)
+    cmds:
+      - scripts/task.sh output-budget output-budget 120 12000 -- bash tests/output-budget.sh
+
   check:
-    desc: Every CI job that runs off Windows -- lint, test, state-machine, config
+    desc: Every CI job that runs off Windows -- lint, test, state-machine, output-budget, config
     # Sequential on purpose: the first failure stops the run and is the
     # last thing on screen.
     cmds:
       - task: lint
       - task: test
       - task: state-machine
+      - task: output-budget
       - task: config
 
   smoke:

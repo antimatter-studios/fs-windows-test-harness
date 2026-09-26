@@ -17,12 +17,40 @@ concurrency:
 permissions:
   contents: read
 
+# THE OUTPUT-BUDGET WRAPPER IS rust-fs-core's, AND IS NOT COMMITTED HERE.
+# scripts/task.sh resolves it through scripts/resolve-output-budget.sh, which
+# reads FS_CORE_ROOT. A runner has no sibling directory, so every job that
+# runs a task clones core at this pinned ref first -- see the
+# `canonical output-budget wrapper` step. The pin moves deliberately; below
+# v0.2.11 the script does not exist at all, and v0.2.13 is the release whose
+# --version answers API 1.
+env:
+  FS_CORE_REF: v0.2.13
+
 jobs:
   lint:
     name: lint (shell + cargo)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: canonical output-budget wrapper (rust-fs-core, pinned)
+        shell: bash
+        run: |
+          # RUNNER_TEMP is a backslash path on the Windows runner and the
+          # resolver is bash on both, so it is converted before use -- the
+          # same cygpath the smoke job uses for its key.
+          temp="$RUNNER_TEMP"
+          if command -v cygpath >/dev/null 2>&1; then
+            temp="$(cygpath -u "$RUNNER_TEMP")"
+          fi
+          git clone --quiet --depth 1 --branch "$FS_CORE_REF" \
+            https://github.com/antimatter-studios/rust-fs-core.git "$temp/rust-fs-core"
+          echo "FS_CORE_ROOT=$temp/rust-fs-core" >> "$GITHUB_ENV"
+          # A verdict, not a transcript: one line proving the pin is a release
+          # that carries the wrapper and answers the API this repository speaks.
+          bash "$temp/rust-fs-core/scripts/output-budget.sh" --version
+
 
       - name: Install shellcheck
         run: |
@@ -62,6 +90,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: canonical output-budget wrapper (rust-fs-core, pinned)
+        shell: bash
+        run: |
+          # RUNNER_TEMP is a backslash path on the Windows runner and the
+          # resolver is bash on both, so it is converted before use -- the
+          # same cygpath the smoke job uses for its key.
+          temp="$RUNNER_TEMP"
+          if command -v cygpath >/dev/null 2>&1; then
+            temp="$(cygpath -u "$RUNNER_TEMP")"
+          fi
+          git clone --quiet --depth 1 --branch "$FS_CORE_REF" \
+            https://github.com/antimatter-studios/rust-fs-core.git "$temp/rust-fs-core"
+          echo "FS_CORE_ROOT=$temp/rust-fs-core" >> "$GITHUB_ENV"
+          # A verdict, not a transcript: one line proving the pin is a release
+          # that carries the wrapper and answers the API this repository speaks.
+          bash "$temp/rust-fs-core/scripts/output-budget.sh" --version
+
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -84,13 +130,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: canonical output-budget wrapper (rust-fs-core, pinned)
+        shell: bash
+        run: |
+          # RUNNER_TEMP is a backslash path on the Windows runner and the
+          # resolver is bash on both, so it is converted before use -- the
+          # same cygpath the smoke job uses for its key.
+          temp="$RUNNER_TEMP"
+          if command -v cygpath >/dev/null 2>&1; then
+            temp="$(cygpath -u "$RUNNER_TEMP")"
+          fi
+          git clone --quiet --depth 1 --branch "$FS_CORE_REF" \
+            https://github.com/antimatter-studios/rust-fs-core.git "$temp/rust-fs-core"
+          echo "FS_CORE_ROOT=$temp/rust-fs-core" >> "$GITHUB_ENV"
+          # A verdict, not a transcript: one line proving the pin is a release
+          # that carries the wrapper and answers the API this repository speaks.
+          bash "$temp/rust-fs-core/scripts/output-budget.sh" --version
+
+
       - name: run state-machine self-test
         run: bash scripts/task.sh state-machine state-machine 50 2400 -- bash tests/state-machine.sh
 
-      # The output budget's own tests, and the check that every chore task
-      # runs under one. A script self-test like the one above, so it lives in
-      # this job rather than adding a required check of its own.
-      - name: output-budget self-test (every task is budgeted)
+      # That the wrapper resolves from rust-fs-core, that both refusals are
+      # loud, and that every chore task runs under a budget. A script
+      # self-test like the one above, so it lives in this job rather than
+      # adding a required check of its own.
+      - name: output-budget self-test (resolves from core; every task is budgeted)
         run: bash scripts/task.sh output-budget output-budget 120 12000 -- bash tests/output-budget.sh
 
       - name: upload state-machine logs
@@ -106,6 +171,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: canonical output-budget wrapper (rust-fs-core, pinned)
+        shell: bash
+        run: |
+          # RUNNER_TEMP is a backslash path on the Windows runner and the
+          # resolver is bash on both, so it is converted before use -- the
+          # same cygpath the smoke job uses for its key.
+          temp="$RUNNER_TEMP"
+          if command -v cygpath >/dev/null 2>&1; then
+            temp="$(cygpath -u "$RUNNER_TEMP")"
+          fi
+          git clone --quiet --depth 1 --branch "$FS_CORE_REF" \
+            https://github.com/antimatter-studios/rust-fs-core.git "$temp/rust-fs-core"
+          echo "FS_CORE_ROOT=$temp/rust-fs-core" >> "$GITHUB_ENV"
+          # A verdict, not a transcript: one line proving the pin is a release
+          # that carries the wrapper and answers the API this repository speaks.
+          bash "$temp/rust-fs-core/scripts/output-budget.sh" --version
+
 
       - name: Install jsonschema
         # Python 3.12+ on ubuntu-latest is PEP 668 managed; --user keeps
@@ -144,6 +227,24 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+
+      - name: canonical output-budget wrapper (rust-fs-core, pinned)
+        shell: bash
+        run: |
+          # RUNNER_TEMP is a backslash path on the Windows runner and the
+          # resolver is bash on both, so it is converted before use -- the
+          # same cygpath the smoke job uses for its key.
+          temp="$RUNNER_TEMP"
+          if command -v cygpath >/dev/null 2>&1; then
+            temp="$(cygpath -u "$RUNNER_TEMP")"
+          fi
+          git clone --quiet --depth 1 --branch "$FS_CORE_REF" \
+            https://github.com/antimatter-studios/rust-fs-core.git "$temp/rust-fs-core"
+          echo "FS_CORE_ROOT=$temp/rust-fs-core" >> "$GITHUB_ENV"
+          # A verdict, not a transcript: one line proving the pin is a release
+          # that carries the wrapper and answers the API this repository speaks.
+          bash "$temp/rust-fs-core/scripts/output-budget.sh" --version
+
 
       - name: chkdsk verdict and offline fallback tests
         shell: powershell

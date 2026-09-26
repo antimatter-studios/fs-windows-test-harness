@@ -5,8 +5,46 @@ loosely follows Keep a Changelog; semver applies from `2.0.0` onward.
 
 ## v4.2.0 — 2026-09-26
 
+### Changed (BREAKING for anyone calling the harness's wrapper directly)
+
+- **The output-budget wrapper comes from `rust-fs-core` and is no longer
+  committed here.** `scripts/output-budget.sh` is deleted;
+  `scripts/resolve-output-budget.sh` finds core's copy at run time —
+  `$FS_CORE_ROOT` if set (authoritative, no fallback), otherwise a
+  `rust-fs-core` sibling beside the main working tree — and verifies its
+  `--version`, not a digest. A missing core, or one answering another API
+  version, fails the task loudly instead of letting a suite run unbudgeted.
+  `chore siblings` puts core where the resolver looks; CI clones it at the
+  pinned `FS_CORE_REF` (`v0.2.13`) and exports `FS_CORE_ROOT`.
+
+  Three consequences for anyone driving tasks here. The verbose variable is
+  now **`OUTPUT_BUDGET_VERBOSE`**, not `FWTH_VERBOSE`; the canonical script
+  reports the old name on stderr rather than honouring it. **A failing task
+  prints no tail by default** — it names the log, its status and its line
+  count; `OUTPUT_BUDGET_FAIL_TAIL=40` restores the old behaviour. And a
+  consumer that called `../fs-windows-test-harness/scripts/output-budget.sh`
+  calls `../rust-fs-core/scripts/output-budget.sh` instead.
+
+  Why: the copies had already drifted. This one read `FWTH_VERBOSE`,
+  fs-linux-test-harness's read `FLTH_VERBOSE`, core's reads
+  `OUTPUT_BUDGET_VERBOSE`, and this one printed forty lines of tail where
+  core prints none — each repository internally consistent, and nothing
+  comparing them (rust-fs-core#153).
+
 ### Added
 
+- **`chore siblings`,** which clones or advances `../rust-fs-core`. The pin is
+  a floor, not a target: a checkout already at or ahead of it is left alone,
+  and one below it is only moved by fast-forwarding a clean `main`. One core
+  checkout is shared by every repository on a machine, and a task that checks
+  out its own pin rewinds somebody else's work.
+- **`chore output-budget`,** the local equivalent of the CI step that was only
+  reachable through the workflow. `tests/output-budget.sh` now drives both
+  refusals — core absent, and core present but answering the wrong API
+  version — proves a task with no resolvable wrapper does not run its command
+  at all, and keeps the rule that every task carries two non-zero budgets. It
+  no longer re-tests the wrapper's own behaviour: that suite lives in
+  rust-fs-core, where the script does.
 - **Per-scenario mutual exclusion with `exclusive_group`.** Scenarios that
   name the same scarce resource still share the runner's global parallelism
   limit, but never execute together. This lets consumers serialize only
