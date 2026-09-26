@@ -543,7 +543,10 @@ PYEOF
     fi
     VM_LOCK_HELD=1
     trap cleanup_run EXIT
-    trap 'echo "[run-tests] VM lease renewal failed; stopping run" >&2; exit 74' USR1
+    VM_LOCK_HEARTBEAT_LOG="${consumer_root}/test-diagnostics/vm-lease-heartbeat.log"
+    mkdir -p "$(dirname "${VM_LOCK_HEARTBEAT_LOG}")"
+    : > "${VM_LOCK_HEARTBEAT_LOG}"
+    trap 'echo "[run-tests] VM lease renewal failed; see ${VM_LOCK_HEARTBEAT_LOG}" >&2; exit 74' USR1
     # Use the orchestrator PID only for signalling this local process. It is
     # never consulted by the VM when deciding whether to reclaim a lease.
     VM_LOCK_PARENT_PID="${BASHPID}"
@@ -554,7 +557,9 @@ PYEOF
                 break
             fi
         done
-    ) &
+    # A remote SSH child may outlive this subshell after cleanup kills it.
+    # Keep its stderr off the caller's pipe so tee can observe EOF.
+    ) > "${VM_LOCK_HEARTBEAT_LOG}" 2>&1 &
     VM_LOCK_HEARTBEAT_PID=$!
     vm_lock_remote Verify
     # The runner's VM commands invoke this token-scoped copy under the
