@@ -74,12 +74,12 @@ elseif (-not (Test-Path -LiteralPath $Workdir -PathType Container)) {
     Reject-Owner 'workdir is missing'
 }
 
-function Open-Gate($path) {
+function Open-Gate($path, [IO.FileShare]$share = [IO.FileShare]::None) {
     $deadline = [DateTime]::UtcNow.AddSeconds(15)
     while ($true) {
         try {
             return [IO.File]::Open($path, [IO.FileMode]::OpenOrCreate,
-                                   [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+                                   [IO.FileAccess]::ReadWrite, $share)
         }
         catch [IO.IOException] {
             if ([DateTime]::UtcNow -ge $deadline) { throw }
@@ -90,9 +90,15 @@ function Open-Gate($path) {
 
 # A running mutation holds operationGate, preventing reclamation. Renewal
 # only needs metadataGate, so long matrix operations do not starve heartbeats.
+# Invoke shares the gate: the owning run's parallel scenarios each hold it,
+# and one long command must not lock its siblings out. Acquire and Release
+# take it exclusively, so they wait until no command is in flight.
 $operationGate = $null
 $gate = $null
-if ($Action -in @('Acquire', 'Invoke', 'Release')) {
+if ($Action -eq 'Invoke') {
+    $operationGate = Open-Gate $operationGatePath ([IO.FileShare]::ReadWrite)
+}
+elseif ($Action -in @('Acquire', 'Release')) {
     $operationGate = Open-Gate $operationGatePath
 }
 $gate = Open-Gate $gatePath
