@@ -3,7 +3,7 @@
 All notable changes to fs-windows-test-harness will land here. The format
 loosely follows Keep a Changelog; semver applies from `2.0.0` onward.
 
-## [Unreleased]
+## v4.2.0 — 2026-09-26
 
 ### Added
 
