@@ -20,7 +20,8 @@ function Invoke-Lock {
         [string]$Action,
         [string]$RunId,
         [string]$Token,
-        [string]$Command = ''
+        [string]$Command = '',
+        [int]$LeaseSeconds = 300
     )
 
     Remove-Item -LiteralPath $capture -Force -ErrorAction SilentlyContinue
@@ -32,7 +33,7 @@ function Invoke-Lock {
         -OwnerHost 'test-host' `
         -OwnerPid '99999999' `
         -OwnerToken $Token `
-        -LeaseSeconds 300 `
+        -LeaseSeconds $LeaseSeconds `
         -Command $Command *> $capture
     $exitCode = $LASTEXITCODE
     $output = if (Test-Path -LiteralPath $capture) {
@@ -91,6 +92,15 @@ try {
     Assert-True ($afterRelease.ExitCode -eq 0) 'a later run can acquire after release'
     $finalRelease = Invoke-Lock Release 'run-b' 'token-b'
     Assert-True ($finalRelease.ExitCode -eq 0) 'the later owner releases cleanly'
+
+    # A command holds the operation gate, so no contender can reclaim while it
+    # runs. Its owner must still be live when that command returns.
+    Assert-True ((Invoke-Lock Acquire 'long-run' 'long-token' -LeaseSeconds 3).ExitCode -eq 0) 'short lease acquires'
+    $long = Invoke-Lock Invoke 'long-run' 'long-token' 'Start-Sleep -Seconds 4' -LeaseSeconds 3
+    Assert-True ($long.ExitCode -eq 0) 'long guarded command completes'
+    $afterLong = Invoke-Lock Verify 'long-run' 'long-token' -LeaseSeconds 3
+    Assert-True ($afterLong.ExitCode -eq 0) "long command preserves its lease: $($afterLong.Output)"
+    Assert-True ((Invoke-Lock Release 'long-run' 'long-token' -LeaseSeconds 3).ExitCode -eq 0) 'long command owner releases'
 
     # Expiry uses the VM clock, not the reported orchestrator PID.
     $old = Invoke-Lock Acquire 'stale' 'stale-token'
