@@ -166,8 +166,25 @@ try {
             $gate.Dispose()
             $gate = $null
             $global:LASTEXITCODE = 0
-            & ([ScriptBlock]::Create($Command))
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            try {
+                & ([ScriptBlock]::Create($Command))
+                $commandExit = $LASTEXITCODE
+            }
+            finally {
+                # Acquire cannot replace this owner while operationGate is
+                # held. Refresh under metadataGate before releasing that gate,
+                # even when a command fails or outlasts the lease.
+                $gate = Open-Gate $gatePath
+                $current = Read-Owner
+                if ($null -eq $current -or
+                    $current.Value.token -cne $OwnerToken -or
+                    $current.Value.run_id -cne $RunId) {
+                    Reject-Owner 'ownership changed during guarded command'
+                }
+                $current.Value.renewed_utc = [DateTimeOffset]::UtcNow.ToString('o')
+                Write-Owner $current.Value
+            }
+            if ($commandExit -ne 0) { exit $commandExit }
             exit 0
         }
     }
