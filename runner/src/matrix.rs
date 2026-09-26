@@ -47,6 +47,13 @@ pub struct Scenario {
     #[serde(default)]
     pub post_verify: Option<PostVerifySpec>,
 
+    /// Optional name of a scarce resource shared by scenarios. Scenarios
+    /// with the same non-empty group name never execute concurrently, while
+    /// scenarios in different groups (or no group) still use the normal
+    /// `[runner].max_parallel` capacity.
+    #[serde(default)]
+    pub exclusive_group: Option<String>,
+
     /// Optional per-scenario post-verify spec. Already declared above —
     /// re-mentioned here only to anchor the doc-comment on the
     /// `extra` field below: `post_verify` is one of several typed

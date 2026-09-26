@@ -110,8 +110,10 @@ def check_pass(rc, scenarios, diag, log):
 
 def check_canary(rc, scenarios, diag, log):
     check(rc != 0, "run-tests.sh exited 0 although canary scenarios must fail")
-    check(re.search(r"failed all \d+ attempts", log),
-          "log does not report the canary as failing every attempt")
+    check("retrying" not in log,
+          "the runner retried the canary: a first-attempt failure must stay red")
+    check(re.search(r"failed on first attempt", log),
+          "log does not report the canary as failing on its first attempt")
     check_common(diag, scenarios, "failed")
 
     for name, scn in scenarios.items():

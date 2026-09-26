@@ -1,12 +1,12 @@
-//! run-matrix — libtest-mimic runner with multi-pass retry.
+//! run-matrix — libtest-mimic scenario runner.
 //!
 //! Loads `harness.toml` and the matrix file; runs each scenario via
 //! [`fs_windows_test_harness::run_recipe`]; writes per-scenario diag artefacts
 //! under `<consumer_root>/test-diagnostics/matrix/`.
 //!
-//! Any scenario that fails is retried up to MAX_RETRIES times. Only
-//! scenarios that fail every attempt are reported as permanently broken.
-//! Failure output includes the last failing step's stderr/stdout.
+//! A scenario must pass on its first attempt. Failure output includes the
+//! failing step's stderr/stdout, and scenarios can name an `exclusive_group`
+//! when a scarce resource must not be shared concurrently.
 
 use fs_windows_test_harness::config::default_config_path;
 use fs_windows_test_harness::{Harness, MaxParallel, VmSection};
@@ -65,6 +65,59 @@ impl Drop for SemaphoreGuard {
         // Clamp to capacity so reductions take effect as slots are released.
         state.available = (state.available + 1).min(state.capacity);
         self.sem.condvar.notify_one();
+    }
+}
+
+/// One single-permit semaphore per named scenario resource.
+///
+/// The global semaphore still bounds total parallelism. This second layer
+/// lets a consumer serialize only the scenarios that compete for the same
+/// scarce resource, without slowing unrelated work.
+#[derive(Default)]
+struct ExclusiveGroups {
+    semaphores: HashMap<String, Arc<Semaphore>>,
+    scenario_counts: HashMap<String, usize>,
+}
+
+impl ExclusiveGroups {
+    fn new<'a>(scenarios: impl Iterator<Item = &'a fs_windows_test_harness::Scenario>) -> Self {
+        let mut groups = Self::default();
+        for scenario in scenarios {
+            let Some(name) = scenario
+                .exclusive_group
+                .as_deref()
+                .filter(|name| !name.is_empty())
+            else {
+                continue;
+            };
+            groups
+                .semaphores
+                .entry(name.to_string())
+                .or_insert_with(|| Semaphore::new(1));
+            *groups.scenario_counts.entry(name.to_string()).or_default() += 1;
+        }
+        groups
+    }
+
+    fn semaphore_for(
+        &self,
+        scenario: &fs_windows_test_harness::Scenario,
+    ) -> Option<Arc<Semaphore>> {
+        scenario
+            .exclusive_group
+            .as_deref()
+            .and_then(|name| self.semaphores.get(name))
+            .cloned()
+    }
+
+    fn sorted_counts(&self) -> Vec<(&str, usize)> {
+        let mut counts: Vec<_> = self
+            .scenario_counts
+            .iter()
+            .map(|(name, count)| (name.as_str(), *count))
+            .collect();
+        counts.sort_unstable_by_key(|(name, _)| *name);
+        counts
     }
 }
 
@@ -232,7 +285,7 @@ fn main() {
     // event took relative to the start of the run, not the wall clock.
     let run_start = std::time::Instant::now();
 
-    // Store scenarios in Arc so Trial closures can reference them across passes.
+    // Store scenarios in Arc so Trial closures can reference them.
     let all_scenarios: Arc<HashMap<String, Arc<fs_windows_test_harness::Scenario>>> = Arc::new(
         runnable
             .into_iter()
@@ -246,224 +299,180 @@ fn main() {
     let cr_arc = Arc::new(consumer_root.clone());
     let run_id = harness.run_id;
 
-    // Any scenario that fails a pass is retried up to MAX_RETRIES times total.
-    // A scenario that passes on any attempt counts as passed. Only scenarios
-    // that fail all MAX_RETRIES attempts are genuinely broken.
-    const MAX_RETRIES: u8 = 5;
+    let exclusive_groups = Arc::new(ExclusiveGroups::new(
+        all_scenarios.values().map(Arc::as_ref),
+    ));
+    for (name, count) in exclusive_groups.sorted_counts() {
+        eprintln!("runner: exclusive_group '{name}' serializes {count} scenario(s)");
+    }
 
-    let mut pending_names: Vec<String> = {
+    let pending_names: Vec<String> = {
         let mut names: Vec<String> = all_scenarios.keys().cloned().collect();
         names.sort();
         names
     };
 
-    let mut permanently_failed: Vec<String> = Vec::new();
+    // The first failure remains a failure. Automatic retries used to turn
+    // transient SSH/resource faults green and overwrite their diagnostics.
+    let failed: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
 
-    for attempt in 0u8..MAX_RETRIES {
-        if attempt > 0 {
+    // Progress counter — incremented by each Trial on completion.
+    let completed: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));
+    let pass_total = pending_names.len();
+
+    // Heartbeat thread: guaranteed progress output every 30 s.
+    {
+        let completed_hb = Arc::clone(&completed);
+        let rs = run_start;
+        std::thread::spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_secs(30));
+            let done = completed_hb.load(Ordering::Relaxed);
+            if done >= pass_total {
+                break;
+            }
             eprintln!(
-                "runner: {} scenario(s) failed — retrying (attempt {}/{MAX_RETRIES})",
-                pending_names.len(),
-                attempt + 1
+                "[{}][+{}] first attempt — {}/{} done",
+                now_clock(),
+                fmt_elapsed(rs.elapsed().as_secs()),
+                done,
+                pass_total,
             );
-        }
+        });
+    }
 
-        // Tracks which scenarios failed this pass and need another attempt.
-        let failed_this_pass: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
-
-        // Progress counter — incremented by each Trial on completion.
-        let completed: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));
-        let pass_total = pending_names.len();
-        let pass_label = if attempt == 0 {
-            format!("pass 1/{MAX_RETRIES}")
-        } else {
-            format!("retry {}/{MAX_RETRIES}", attempt + 1)
-        };
-
-        // Heartbeat thread: guaranteed progress output every 30 s.
-        {
-            let completed_hb = Arc::clone(&completed);
-            let label = pass_label.clone();
+    let mut trials: Vec<Trial> = pending_names
+        .iter()
+        .map(|name| {
+            let name = name.clone();
+            let scn = Arc::clone(all_scenarios.get(&name).unwrap());
+            let cfg = Arc::clone(&config_arc);
+            let lc = Arc::clone(&local_config_arc);
+            let cr = Arc::clone(&cr_arc);
+            let sem = Arc::clone(&semaphore);
+            let group_sem = exclusive_groups.semaphore_for(&scn);
+            let failed_set = Arc::clone(&failed);
+            let done_ctr = Arc::clone(&completed);
             let rs = run_start;
-            std::thread::spawn(move || loop {
-                std::thread::sleep(std::time::Duration::from_secs(30));
-                let done = completed_hb.load(Ordering::Relaxed);
-                if done >= pass_total {
-                    break;
-                }
+
+            Trial::test(name.clone(), move || {
+                let wait_start = std::time::Instant::now();
+                let diag = matrix_diag_root(&cr).join(&name);
+                let _ = std::fs::create_dir_all(&diag);
+
+                // Take a named resource before a global slot so scenarios
+                // queued on one scarce resource do not consume global permits.
+                let _group_guard = group_sem.as_ref().map(Semaphore::acquire);
+                let _global_guard = sem.acquire();
+                let exec_start = std::time::Instant::now();
                 eprintln!(
-                    "[{}][+{}] {} — {}/{} done",
+                    "\n[{}][+{}] >>> {name}",
                     now_clock(),
-                    fmt_elapsed(rs.elapsed().as_secs()),
-                    label,
-                    done,
-                    pass_total,
+                    fmt_elapsed(rs.elapsed().as_secs())
                 );
-            });
-        }
 
-        let mut trials: Vec<Trial> = pending_names
-            .iter()
-            .map(|name| {
-                let name = name.clone();
-                let scn = Arc::clone(all_scenarios.get(&name).unwrap());
-                let cfg = Arc::clone(&config_arc);
-                let lc = Arc::clone(&local_config_arc);
-                let cr = Arc::clone(&cr_arc);
-                let sem = Arc::clone(&semaphore);
-                let retry_set = Arc::clone(&failed_this_pass);
-                let done_ctr = Arc::clone(&completed);
-                let rs = run_start;
-
-                Trial::test(name.clone(), move || {
-                    let wait_start = std::time::Instant::now();
-                    let diag = matrix_diag_root(&cr).join(&name);
-                    let _ = std::fs::create_dir_all(&diag);
-
-                    let _guard = sem.acquire();
-                    let exec_start = std::time::Instant::now();
-                    eprintln!(
-                        "\n[{}][+{}] >>> {name}",
-                        now_clock(),
-                        fmt_elapsed(rs.elapsed().as_secs())
-                    );
-
-                    let step_start_ref =
-                        std::sync::Arc::new(std::sync::Mutex::new(std::time::Instant::now()));
-                    let name_cb = name.clone();
-                    let outcome = fs_windows_test_harness::run_recipe(
-                        &name,
-                        &scn,
-                        &cfg,
-                        &lc,
-                        &cr,
-                        &diag,
-                        run_id,
-                        |step_result| {
-                            let step_secs = {
-                                let t = step_start_ref.lock().unwrap();
-                                t.elapsed().as_secs()
-                            };
-                            let passed = step_result.skipped
-                                || (step_result.error.is_none()
-                                    && step_result.exit_code == Some(step_result.expected_exit));
-                            let mark = if passed { "ok  " } else { "FAIL" };
-                            let detail = step_detail(step_result);
-                            eprintln!(
-                                "[{}][+{}]   {:02} {:<20} {}  {}{}",
-                                now_clock(),
-                                fmt_elapsed(rs.elapsed().as_secs()),
-                                step_result.index,
-                                step_result.op,
-                                mark,
-                                fmt_elapsed(step_secs),
-                                detail,
-                            );
-                            *step_start_ref.lock().unwrap() = std::time::Instant::now();
-                            let _ = &name_cb;
-                        },
-                    );
-                    let exec_secs = exec_start.elapsed().as_secs();
-                    let total_secs = wait_start.elapsed().as_secs_f64();
-
-                    done_ctr.fetch_add(1, Ordering::Relaxed);
-
-                    let (status, error) = outcome_status(&outcome, &diag);
-                    let result = ScenarioResult {
-                        name: name.clone(),
-                        status: status.to_string(),
-                        error: error.clone(),
-                        diag_dir: diag.display().to_string(),
-                        duration_secs: total_secs,
-                    };
-                    let _ = std::fs::write(
-                        diag.join("result.json"),
-                        serde_json::to_string_pretty(&result).unwrap_or_else(|_| "{}".into()),
-                    );
-                    if let Ok(r) = &outcome {
-                        let _ = std::fs::write(
-                            diag.join("recipe.json"),
-                            serde_json::to_string_pretty(r).unwrap_or_default(),
-                        );
-                    }
-
-                    if status != "passed" {
-                        let reason = error.as_deref().unwrap_or("unknown error");
+                let step_start_ref =
+                    std::sync::Arc::new(std::sync::Mutex::new(std::time::Instant::now()));
+                let name_cb = name.clone();
+                let outcome = fs_windows_test_harness::run_recipe(
+                    &name,
+                    &scn,
+                    &cfg,
+                    &lc,
+                    &cr,
+                    &diag,
+                    run_id,
+                    |step_result| {
+                        let step_secs = {
+                            let t = step_start_ref.lock().unwrap();
+                            t.elapsed().as_secs()
+                        };
+                        let passed = step_result.skipped
+                            || (step_result.error.is_none()
+                                && step_result.exit_code == Some(step_result.expected_exit));
+                        let mark = if passed { "ok  " } else { "FAIL" };
+                        let detail = step_detail(step_result);
                         eprintln!(
-                            "[{}][+{}] FAIL {name}  (total {})  — {reason}\n",
+                            "[{}][+{}]   {:02} {:<20} {}  {}{}",
                             now_clock(),
                             fmt_elapsed(rs.elapsed().as_secs()),
-                            fmt_elapsed(exec_secs),
+                            step_result.index,
+                            step_result.op,
+                            mark,
+                            fmt_elapsed(step_secs),
+                            detail,
                         );
-                        retry_set.lock().unwrap().insert(name.clone());
-                        return Err(Failed::from(error.unwrap_or_else(|| "failed".into())));
-                    }
+                        *step_start_ref.lock().unwrap() = std::time::Instant::now();
+                        let _ = &name_cb;
+                    },
+                );
+                let exec_secs = exec_start.elapsed().as_secs();
+                let total_secs = wait_start.elapsed().as_secs_f64();
+
+                done_ctr.fetch_add(1, Ordering::Relaxed);
+
+                let (status, error) = outcome_status(&outcome, &diag);
+                let result = ScenarioResult {
+                    name: name.clone(),
+                    status: status.to_string(),
+                    error: error.clone(),
+                    diag_dir: diag.display().to_string(),
+                    duration_secs: total_secs,
+                };
+                let _ = std::fs::write(
+                    diag.join("result.json"),
+                    serde_json::to_string_pretty(&result).unwrap_or_else(|_| "{}".into()),
+                );
+                if let Ok(r) = &outcome {
+                    let _ = std::fs::write(
+                        diag.join("recipe.json"),
+                        serde_json::to_string_pretty(r).unwrap_or_default(),
+                    );
+                }
+
+                if status != "passed" {
+                    let reason = error.as_deref().unwrap_or("unknown error");
                     eprintln!(
-                        "[{}][+{}] pass {name}  (total {})\n",
+                        "[{}][+{}] FAIL {name}  (total {})  — {reason}\n",
                         now_clock(),
                         fmt_elapsed(rs.elapsed().as_secs()),
                         fmt_elapsed(exec_secs),
                     );
-                    Ok(())
-                })
+                    failed_set.lock().unwrap().insert(name.clone());
+                    return Err(Failed::from(error.unwrap_or_else(|| "failed".into())));
+                }
+                eprintln!(
+                    "[{}][+{}] pass {name}  (total {})\n",
+                    now_clock(),
+                    fmt_elapsed(rs.elapsed().as_secs()),
+                    fmt_elapsed(exec_secs),
+                );
+                Ok(())
             })
-            .collect();
+        })
+        .collect();
 
-        // Include ignored trials on the first pass for the correct summary count.
-        if attempt == 0 {
-            for name in &ignored_names {
-                trials.push(Trial::test(name, || Ok(())).with_ignored_flag(true));
-            }
-        }
-
-        let _ = libtest_mimic::run(&args, trials);
-
-        let mut retry_names: Vec<String> = {
-            let mut names: Vec<String> = failed_this_pass.lock().unwrap().iter().cloned().collect();
-            names.sort();
-            names
-        };
-
-        if retry_names.is_empty() {
-            break; // All passed this pass — done.
-        }
-
-        // Accounting before retry.
-        eprintln!("----------------------------------------------------------------");
-        eprintln!(
-            "[{}][+{}] pass {}/{MAX_RETRIES} done: {} passed, {} failed",
-            now_clock(),
-            fmt_elapsed(run_start.elapsed().as_secs()),
-            attempt + 1,
-            pass_total - retry_names.len(),
-            retry_names.len(),
-        );
-        for n in &retry_names {
-            eprintln!("  ✗ {n}");
-        }
-        eprintln!("----------------------------------------------------------------");
-
-        if attempt + 1 >= MAX_RETRIES {
-            eprintln!(
-                "runner: {} scenario(s) failed all {MAX_RETRIES} attempts — genuinely broken",
-                retry_names.len()
-            );
-            permanently_failed.append(&mut retry_names);
-            break;
-        }
-
-        eprintln!(
-            "[{}][+{}] retrying {} scenario(s)…",
-            now_clock(),
-            fmt_elapsed(run_start.elapsed().as_secs()),
-            retry_names.len(),
-        );
-        pending_names = retry_names;
+    for name in &ignored_names {
+        trials.push(Trial::test(name, || Ok(())).with_ignored_flag(true));
     }
+
+    let _ = libtest_mimic::run(&args, trials);
+
+    let failed_names: Vec<String> = {
+        let mut names: Vec<String> = failed.lock().unwrap().iter().cloned().collect();
+        names.sort();
+        names
+    };
 
     let _ = aggregate_results(&consumer_root);
 
-    if !permanently_failed.is_empty() {
+    if !failed_names.is_empty() {
+        eprintln!(
+            "runner: {} scenario(s) failed on first attempt — automatic retries are disabled",
+            failed_names.len()
+        );
+        for name in &failed_names {
+            eprintln!("  ✗ {name}");
+        }
         std::process::exit(101);
     }
 }
@@ -863,6 +872,74 @@ fn claim_run_dir(image_root: &Path, run_id: u128) {
     let dir = image_root.join(run_id.to_string());
     if std::fs::create_dir_all(&dir).is_ok() {
         let _ = std::fs::write(dir.join(OWNER_PID_FILE), std::process::id().to_string());
+    }
+}
+
+#[cfg(test)]
+mod exclusive_group_tests {
+    use super::*;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    fn scenario(group: Option<&str>) -> fs_windows_test_harness::Scenario {
+        fs_windows_test_harness::Scenario {
+            image: String::new(),
+            recipe: Vec::new(),
+            post_verify: None,
+            exclusive_group: group.map(str::to_string),
+            extra: serde_json::Map::new(),
+            status: None,
+            attempts: None,
+            notes: None,
+            evidence_link: None,
+        }
+    }
+
+    #[test]
+    fn equal_group_names_share_one_single_permit_semaphore() {
+        let first = scenario(Some("large-volume"));
+        let second = scenario(Some("large-volume"));
+        let groups = ExclusiveGroups::new([&first, &second].into_iter());
+        let first_sem = groups.semaphore_for(&first).expect("first group");
+        let second_sem = groups.semaphore_for(&second).expect("second group");
+        assert!(Arc::ptr_eq(&first_sem, &second_sem));
+        assert_eq!(groups.sorted_counts(), vec![("large-volume", 2)]);
+
+        let first_guard = first_sem.acquire();
+        let (attempting_tx, attempting_rx) = mpsc::channel();
+        let (acquired_tx, acquired_rx) = mpsc::channel();
+        let waiter = std::thread::spawn(move || {
+            attempting_tx.send(()).unwrap();
+            let _second_guard = second_sem.acquire();
+            acquired_tx.send(()).unwrap();
+        });
+
+        attempting_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("waiter started");
+        assert!(
+            acquired_rx
+                .recv_timeout(Duration::from_millis(100))
+                .is_err(),
+            "the second scenario acquired the same exclusive group concurrently"
+        );
+        drop(first_guard);
+        acquired_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("waiter acquires after release");
+        waiter.join().unwrap();
+    }
+
+    #[test]
+    fn different_or_absent_groups_do_not_share_semaphores() {
+        let large = scenario(Some("large-volume"));
+        let memory = scenario(Some("memory-heavy"));
+        let ordinary = scenario(None);
+        let groups = ExclusiveGroups::new([&large, &memory, &ordinary].into_iter());
+        let large_sem = groups.semaphore_for(&large).expect("large group");
+        let memory_sem = groups.semaphore_for(&memory).expect("memory group");
+        assert!(!Arc::ptr_eq(&large_sem, &memory_sem));
+        assert!(groups.semaphore_for(&ordinary).is_none());
     }
 }
 

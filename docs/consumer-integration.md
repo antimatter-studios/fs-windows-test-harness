@@ -102,6 +102,12 @@ A first scenario:
 output against the declared expectations; mismatch is a failed verdict.
 Capture real values once with the driver running locally, paste them in.
 
+When several scenarios compete for one scarce resource, give them the same
+non-empty `exclusive_group`. Those scenarios execute one at a time while all
+other scenarios retain the parallelism configured by
+`[runner].max_parallel`. A failed scenario is never retried automatically:
+the first-attempt diagnostics and non-zero verdict are preserved.
+
 ## 4. One-time VM provisioning
 
 ```sh
