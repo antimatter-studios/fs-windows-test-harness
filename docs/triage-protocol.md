@@ -3,95 +3,80 @@
 How to interpret a failed scenario. Order matters: each step narrows
 the search space cheaply before the next, more expensive one.
 
-## 1. Top-level verdict
+## 1. The FAIL line
 
-Open the run's `results.json`:
+The run's transcript names every failed scenario on a `FAIL` line: the
+step, its op and why it stopped, either `exit Some(1) != expected 0` or
+`errored: <reason>`. The last 4 KB of that step's stderr and stdout follow
+it. Often that is enough.
+
+## 2. Top-level results
+
+Open `test-diagnostics/matrix/results.json`, one entry per scenario:
 
 ```json
 {
   "name": "ro-list-root",
-  "verdict": "failed",
-  "duration_ms": 1842,
-  "diag_dir": "ro-list-root"
+  "status": "failed",
+  "error": "step 1 (ls) exit Some(1) != expected 0\n--- stderr ---\n...",
+  "diag_dir": "/path/to/consumer/test-diagnostics/matrix/ro-list-root",
+  "duration_secs": 4.2
 }
 ```
 
-Verdicts:
+Statuses:
 
-- `passed` — all ops met expectations.
-- `failed` — at least one op produced output that did not match its
-  `expect_*` fields. The driver ran but disagreed with reality.
-- `errored` — an op (or the mount, or post-verify) errored before
-  producing comparable output. Could be a missing binary, a spawn
-  failure, a timeout, an unmappable template token, etc.
-- `blocked` — the scenario's status was `blocked-needs-*`; the runner
-  skipped it deliberately. Not a bug; agents bookkeep these.
+- `passed` — every step exited with its expected code.
+- `failed` — a step exited with another code, or errored: its command
+  could not be built (an unresolved template reference), could not start,
+  or hit `FSWTH_STEP_TIMEOUT_SECONDS`. The recipe stopped there.
+- `errored` — the runner could not run the recipe at all, for example
+  because a step names an op that `[ops]` does not declare. Fix the
+  configuration before suspecting the driver.
 
-## 2. Per-scenario manifest
+A scenario with no recipe is reported as ignored and has no entry here.
 
-`<diag-dir>/manifest.json` carries the verdict plus a structured op
-trace:
+## 3. The recipe
 
-```json
-{
-  "scenario": "ro-list-root",
-  "verdict": "failed",
-  "started_at": "2026-05-07T19:23:04Z",
-  "duration_ms": 1842,
-  "mount": { "ok": true, "stdout_path": "mount-stdout.txt" },
-  "ops": [
-    {
-      "index": 0, "type": "ls", "ok": false,
-      "reason": "expect_names mismatch",
-      "expected": [".", "..", "lost+found"],
-      "actual":   [".", "..", "lost+found", "stale-marker.txt"]
-    }
-  ],
-  "post_verify": null
-}
-```
+`<diag-dir>/recipe.json` lists every step that ran, in order, and
+`overall_passed`. Steps stop at the first failure, so the last entry is
+the one to read.
 
-If the verdict is `errored` rather than `failed`, the manifest has an
-`error` field at top level pointing at the stage that died (mount,
-op-N, post-verify). Skip to step 4.
+## 4. The failing step
 
-## 3. Per-op evidence
+Each step has its own directory, `<diag-dir>/step-NN/`:
 
-For a failed op, look in this order:
+- **`step.json`** — what ran and how it ended:
 
-1. **`op-trace.jsonl`** — one JSON line per op. Has the substituted
-   command line the runner actually executed, the captured stdout/
-   stderr lengths, and the per-op verdict.
-2. **`opNN-stdout.txt`** + **`opNN-stderr.txt`** — full output of the
-   substituted command. (`NN` is the op index; `op00`, `op01`, …)
-3. **`scenario.json`** — the scenario as the PS runner saw it. Compare
-   to `test-matrix.json` to be sure no template substitution went wrong.
+  ```json
+  {
+    "index": 1, "op": "ls", "host": "vm",
+    "command": "C:/fswth/my-driver/target/release/my-driver.exe ls ...",
+    "exit_code": 1, "expected_exit": 0, "duration_ms": 2310,
+    "skipped": false, "skip_reason": null, "error": null
+  }
+  ```
 
-## 4. Mount + post-verify evidence
+  `command` is the template after substitution, so a wrong token shows
+  here. When `error` is set and `exit_code` is null, the step never
+  produced an exit code; `error` says why.
+- **`stdout.txt`** + **`stderr.txt`** — the step's full output. For a
+  `host = "vm"` step that is everything the Windows side printed,
+  including the harness's op scripts: a mount that exited early or never
+  printed its ready line says so in `stderr.txt`.
 
-For `errored` mounts:
+`test-diagnostics/vm-lease-heartbeat.log` records the VM-workdir lease, for
+a run that lost its lease or waited on another.
 
-- **`mount-stdout.txt`** — contains the `ready_line` regex match (or
-  doesn't, which is the failure mode).
-- **`mount-stderr.txt`** — driver panics, missing DLLs, missing WinFsp,
-  unmappable image paths.
-- **`ps-stdout.txt`** + **`ps-stderr.txt`** — full PowerShell transcript
-  including the runner's own debug output, drive-letter selection
-  logic, and any errors before/after the mount lifecycle.
-
-For post-verify failures:
-
-- **`post-verify-stdout.txt`** + **`post-verify-stderr.txt`** — the
-  reference checker's output (`fsck`, `chkdsk`, etc.). The exit code
-  is checked against `[post_verify] expect_exit`.
-
-## 5. Reproducing locally
+## 5. Reproducing by hand
 
 Once you have a hypothesis, drop the test harness and reproduce by
 hand:
 
-1. Copy the image referenced in `scenario.json` to a known dir.
-2. Run the substituted commands from `op-trace.jsonl` directly.
+1. Take `command` from the failing step's `step.json`.
+2. Run it where the step ran: on the host for `host = "host"`, or in the
+   guest for `host = "vm"` (on the QEMU guest, `python3
+   scripts/local-vm.py ssh -- '<command>'` from the harness checkout).
 3. Compare to your hypothesis.
 
 This loop is *much* faster than re-running the full matrix harness for
@@ -105,19 +90,21 @@ After you fix the driver, update the scenario:
 - Add an entry to `_attempts` in `test-matrix.json` describing the
   hypothesis, the change, and the result.
 - Reset the scenario's status with
-  `bash harness/scripts/update-scenario-status.sh <name> pending`.
+  `bash ../fs-windows-test-harness/scripts/update-scenario-status.sh <name> pending`.
 - Re-run the harness to confirm.
 
-If the scenario passes, the next run sets it to `passed-<session>` and
-writes `evidence_link` pointing at the green diag dir.
+If the scenario passes, record it with
+`bash ../fs-windows-test-harness/scripts/update-scenario-status.sh <name> passed-<session> <diag-dir>`;
+the third argument is written to `evidence_link`. The runner itself never
+changes a scenario's status.
 
 ## Anti-patterns
 
 - **Don't hand-edit a scenario's `expect_*` to make it pass.** That
   silently widens the contract. Either the driver is wrong (fix it) or
   the expectation was wrong (write down *why* it changed in `_notes`).
-- **Don't ignore `errored` to find more `failed`.** An errored mount
-  often poisons every downstream scenario via stuck drive letters or
-  WinFsp host state.
+- **Don't skip past a failed mount to chase other failures.** A mount
+  that failed can leave a drive letter or WinFsp host state behind for
+  the scenarios after it.
 - **Don't trust a green run after editing only `expect_*`.** Re-run
   with a clean diag dir.

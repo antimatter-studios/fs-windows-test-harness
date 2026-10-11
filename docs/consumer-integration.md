@@ -146,7 +146,7 @@ consumers that build WinFsp bindings via `bindgen` (`ext4-win-driver`,
 required features needs an uninstall and reinstall; winget reconfigure
 with a new `ADDLOCAL` set can return 1603.
 
-(Mac-side `.test-env` is bootstrapped automatically by `run-tests.sh`
+(The host-side `.test-env` is bootstrapped automatically by `run-tests.sh`
 on first run — see step 5.)
 
 ## 5. Run a scenario
@@ -172,25 +172,26 @@ bash ../fs-windows-test-harness/scripts/run-tests.sh --help    # full flag surfa
 ## 6. Read the diag
 
 ```
-test-diagnostics/run-2026-05-07T19-23-04Z/
-  run-manifest.json                 # project, host, sha, scenario count
-  results.json                      # one row per scenario: name + verdict
-  ro-list-root/
-    manifest.json                   # verdict + op trace summary
-    scenario.json                   # what the PS runner saw
-    mount-stdout.txt
-    mount-stderr.txt
-    op-trace.jsonl                  # one line per op: input, output, verdict
-    op00-stdout.txt                 # per-op stdout
-    op00-stderr.txt
-    ps-stdout.txt                   # full PowerShell transcript
-    ps-stderr.txt
-    result.json
+test-diagnostics/
+  matrix/                           # cleared at the start of each run
+    run-manifest.json               # timestamp, host OS, git SHA, project, scenario counts
+    results.json                    # one entry per scenario: name, status, error, diag_dir
+    ro-list-root/
+      result.json                   # this scenario's entry
+      recipe.json                   # every step that ran, and overall_passed
+      step-00/
+        step.json                   # op, host, resolved command, exit code, duration, error
+        stdout.txt
+        stderr.txt
+      step-01/
+        ...
+  vm-lease-heartbeat.log
 ```
 
-Start at `manifest.json` for the verdict. If `failed`, walk
-`op-trace.jsonl` to find the offending op, then open the matching
-`opNN-stdout.txt` / `opNN-stderr.txt`. See
+Start at `results.json` for the status. If `failed`, open the scenario's
+`recipe.json`: the last step listed is the one that stopped it. Its
+`step-NN/step.json` shows the exact command and exit code, and
+`stdout.txt` / `stderr.txt` its output. See
 [`triage-protocol.md`](triage-protocol.md) for the full checklist.
 
 ## 7. Add more scenarios

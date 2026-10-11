@@ -21,24 +21,25 @@ The claim/update/reset scripts read `FS_HARNESS_SESSION` (or accept
 ## Claim before you run
 
 ```sh
-bash harness/scripts/claim-scenario.sh
+bash ../fs-windows-test-harness/scripts/claim-scenario.sh
 ```
 
 What it does:
 
 1. Reads `test-matrix.json`.
 2. Picks the first `pending` scenario.
-3. Atomically rewrites the matrix with that scenario's status set to
-   `claimed-<session>` (via `mktemp` + `mv`).
-4. Reads the file back to verify *this* session won the race.
-5. On collision, retries with the next pending scenario, up to 16
-   attempts with jittered backoff.
-6. On success, prints the scenario name to stdout. On no-pending,
+3. Rewrites the matrix with that scenario's status set to
+   `claimed-<session>` and renames it into place.
+4. Does all of that under an exclusive `flock` on the matrix file
+   (`scripts/_matrix_txn.py`), so concurrent claimers queue: each sees
+   every claim made before it, and none can overwrite one with a stale
+   copy.
+5. On success, prints the scenario name to stdout. On no-pending,
    exits 1.
 
 ```sh
-SCENARIO=$(bash harness/scripts/claim-scenario.sh)
-bash harness/scripts/run-tests.sh "$SCENARIO"
+SCENARIO=$(bash ../fs-windows-test-harness/scripts/claim-scenario.sh)
+bash ../fs-windows-test-harness/scripts/run-tests.sh "$SCENARIO"
 ```
 
 ## Run, then update
@@ -48,7 +49,7 @@ The runner does *not* mutate scenario status — it only writes
 are the agent's responsibility, via:
 
 ```sh
-bash harness/scripts/update-scenario-status.sh "$SCENARIO" passed-"$FS_HARNESS_SESSION" \
+bash ../fs-windows-test-harness/scripts/update-scenario-status.sh "$SCENARIO" passed-"$FS_HARNESS_SESSION" \
     --evidence-link "test-diagnostics/run-<UTC>/$SCENARIO"
 ```
 
@@ -66,7 +67,7 @@ other.
 ## Reset between passes
 
 ```sh
-bash harness/scripts/reset-non-passed.sh
+bash ../fs-windows-test-harness/scripts/reset-non-passed.sh
 ```
 
 Atomically rewrites `test-matrix.json`: every scenario whose status is
@@ -77,10 +78,12 @@ matrix runs when you want to retry the failed/blocked subset.
 
 What's safe in parallel:
 
-- **Multiple agents claiming scenarios** from the same matrix. Atomic
-  rename + read-back-verify is the load-bearing primitive.
+- **Multiple agents claiming scenarios** from the same matrix. The
+  locked read-modify-write in `scripts/_matrix_txn.py` is the
+  load-bearing primitive.
 - **Multiple agents on different VMs.** Use distinct
-  `harness.toml [vm.workdir]` paths so source-tar extracts don't trample.
+  `[vm] workdir` paths (or `--vm-workdir`) so their shipped trees and
+  VM-workdir leases stay apart.
 
 What's NOT safe in parallel:
 
@@ -99,7 +102,7 @@ If an agent dies mid-scenario, its claim is left in the matrix as
 `claimed-<session>` indefinitely. To recover:
 
 1. Confirm the session is dead (no live process owns it).
-2. `bash harness/scripts/reset-non-passed.sh` will sweep it back to
+2. `bash ../fs-windows-test-harness/scripts/reset-non-passed.sh` will sweep it back to
    `pending`. Or hand-edit one row's status.
 
 There is no liveness check; we lean on the simpler "agents tidy up
@@ -110,12 +113,12 @@ their loop with their own watchdog.
 
 ```sh
 export FS_HARNESS_SESSION="agent-$(uuidgen | head -c 8)"
-while SCENARIO=$(bash harness/scripts/claim-scenario.sh); do
-    if bash harness/scripts/run-tests.sh "$SCENARIO"; then
-        bash harness/scripts/update-scenario-status.sh "$SCENARIO" \
+while SCENARIO=$(bash ../fs-windows-test-harness/scripts/claim-scenario.sh); do
+    if bash ../fs-windows-test-harness/scripts/run-tests.sh "$SCENARIO"; then
+        bash ../fs-windows-test-harness/scripts/update-scenario-status.sh "$SCENARIO" \
              "passed-$FS_HARNESS_SESSION"
     else
-        bash harness/scripts/update-scenario-status.sh "$SCENARIO" \
+        bash ../fs-windows-test-harness/scripts/update-scenario-status.sh "$SCENARIO" \
              "failed-$FS_HARNESS_SESSION"
     fi
 done

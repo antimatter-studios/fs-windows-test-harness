@@ -1,46 +1,57 @@
 # Architecture
 
-A three-layer system: **Mac orchestrator + Windows VM agent + shared
-state file**.
+Three parts: **an orchestrator on the host** (macOS, Linux or WSL2) that
+runs every scenario, **a Windows guest** that executes the steps sent to it
+over SSH, and **the consumer's `test-matrix.json`**, the shared state file.
 
 ## Topology
 
 ```
-+-- Mac (developer laptop) ---------------------+
-| <harness>/scripts/run-tests.sh                |
-|   tar consumer source -> ssh ->               |
-|   remote `cargo run --bin run-matrix` ->      |
-|   pull test-diagnostics tree                  |
-+----------------------+------------------------+
-                       | ssh
-                       v
-+-- Windows VM ---------+-----------------------+
-| run-matrix bin (libtest-mimic, one trial /    |
-|   scenario):                                  |
-|   for each scenario:                          |
-|     adapter.build_scenario_json -> scenario.json
-|     spawn run-scenario.ps1                    |
-|     parse VERDICT= marker                     |
-+----------------------+------------------------+
-                       | spawn
-                       v
-+-- per-scenario PowerShell --------------------+
-| <harness>/scripts/run-scenario.ps1            |
-|   A. resolve image                            |
-|   B. spawn `<binary> mount <image> ...`,      |
-|      wait for ready_line regex match          |
-|   C. iterate ops[]: template substitution OR  |
-|      built-in PS file op (write/mkdir/...)    |
-|   D. stop mount process                       |
-|   E. (optional) post_verify command           |
-|   F. write manifest.json + op-trace.jsonl     |
-+-----------------------------------------------+
++-- Host (macOS / Linux / WSL2) ----------------------------------+
+| <harness>/scripts/run-tests.sh                                  |
+|   bootstrap .test-env, SSH preflight                            |
+|   take the VM-workdir lease (scripts/vm/matrix-run-lock.ps1)    |
+|   ship harness + consumer scripts/vm/ and the driver binary     |
+|     (or the source, when [run].vm_build_command is set)         |
+|   cargo run --bin run-matrix          <- runs here, on the host |
+|                                                                 |
+| run-matrix (libtest-mimic, one trial per scenario,              |
+|   up to [runner].max_parallel at once)                          |
+|   for each recipe step, in order, stopping at the first fail:   |
+|     host = "host"              -> a local subprocess            |
+|     host = "vm"                -> one ssh command to the guest  |
+|     ship-to-vm / ship-to-host  -> scp an image across           |
+|   writes test-diagnostics/matrix/ on the host                   |
++-------------------------------+---------------------------------+
+                                | ssh / scp, one command per step
+                                v
++-- Windows guest ------------------------------------------------+
+| OpenSSH with PowerShell as its default shell, and WinFsp        |
+| <workdir>/scripts/vm/*.ps1: op scripts, run lock, chkdsk        |
+| the driver binary: each op mounts, works and unmounts within    |
+|   its own SSH session                                           |
++-----------------------------------------------------------------+
 ```
 
-The mount lifecycle is process-global on Windows (drive-letter
-assignment, WinFsp host singletons), so scenarios serialise via a
-`Mutex` in the runner *and* `--test-threads=1` is forced. Concurrent
-runs across separate VMs are independent.
+Locally the guest is normally the QEMU guest from
+[`qemu-vm.md`](qemu-vm.md), reached as `fswth-local` through
+`local-vm.py exec --`. [`vm-setup.md`](vm-setup.md) describes a hand-built
+VMware guest instead, and CI's `smoke` job uses its own `windows-latest`
+runner as the guest. Nothing of the harness runs on the guest between
+steps. A mount process dies with the SSH session that started it, so each
+Windows-side op is self-contained: `scripts/vm/_lib.ps1` mounts, waits for
+the driver's ready line, runs the op and unmounts in a `finally`.
+
+## Parallelism
+
+Scenarios run concurrently, up to `[runner].max_parallel`: a number
+(default 1), or `"drive-letters"`, which asks the guest how many drive
+letters are free. The runner clamps it to 1–24 and sizes libtest-mimic's
+thread pool to match. A scenario that names an `exclusive_group` takes that
+group's slot before a global one, so scenarios sharing a scarce resource
+run one at a time without holding global slots while they wait. Drive
+letters do not guarantee memory: choose a value the guest can hold (the
+QEMU guest has 4 GiB). Separate guests are independent.
 
 ## Lifecycle: state machine for one scenario
 
@@ -51,64 +62,75 @@ runs across separate VMs are independent.
      v
    claimed-<session>
      |
-     | run-matrix executes the scenario
+     | run-matrix runs its recipe; result.json says passed, failed or errored
      |
-     +-- VERDICT=passed --> update-scenario-status.sh ... passed-<session>
-     +-- VERDICT=failed --> update-scenario-status.sh ... failed-<session>
-     +-- VERDICT=errored -> update-scenario-status.sh ... errored-<session>
-     +-- (agent decision) -> blocked-needs-<feature>
+     +-- passed  --> update-scenario-status.sh <name> passed-<session> [<diag-dir>]
+     +-- failed  --> update-scenario-status.sh <name> failed-<session> [<diag-dir>]
+     +-- errored --> update-scenario-status.sh <name> errored-<session> [<diag-dir>]
+     +-- (agent decision) --> blocked-needs-<feature>
 ```
 
 The runner does not write status itself -- agents drive transitions
-via the `claim-scenario.sh` / `update-scenario-status.sh` pair. The
-runner only writes `result.json` (per scenario) and `results.json`
-(aggregate) under the diag tree; status is the human / agent loop's
-job to maintain.
+via the `claim-scenario.sh` / `update-scenario-status.sh` pair, whose
+optional third argument records the `evidence_link`. The runner only
+writes the diagnostics tree below. A scenario with no recipe is reported
+as ignored rather than run.
+
+A scenario **passes** when every step exits with its expected code (a step
+whose op `when` predicate is false is skipped). It **fails** when a step
+exits with another code or errors: its command could not be built (an
+unresolved template reference), could not start, or hit its timeout. The
+recipe stops at that step. It is **errored** when the runner could not run
+the recipe at all, for example because a step names an op that `[ops]` does
+not declare.
 
 ## State storage
 
 `test-matrix.json` at the consumer repo root is the single source of
 truth. Schema is documented in [`../schemas/test-matrix.schema.json`](../schemas/test-matrix.schema.json).
 
-All mutations are atomic via `mktemp` + `mv`. The `claim-scenario.sh`
-script also reads back after the rename and verifies the session won
-the race; if not, it retries with the next pending scenario, up to 16
-attempts.
+Every mutation (claim, status update, reset) is one read-modify-write
+under an exclusive `flock` on the matrix file
+([`scripts/_matrix_txn.py`](../scripts/_matrix_txn.py)), and the new file
+is renamed into place before the lock is released. Concurrent claimers
+therefore queue rather than race, and none can overwrite another's claim
+with a stale copy.
 
 ## Diagnostics layout
 
-Pulled to `<consumer-root>/test-diagnostics/run-<UTC>/` after each Mac
-invocation:
+`run-matrix` runs on the host, so it writes the tree directly under
+`<consumer-root>/test-diagnostics/matrix/`, which it clears at the start of
+each run:
 
 ```
-test-diagnostics/run-<UTC>/
-  run-manifest.json         project, host, sha, scenario count
-  results.json              aggregated pass/fail (one element per scenario)
-  <scenario-name>/
-    manifest.json           per-scenario verdict, op trace, timing
-    scenario.json           the resolved scenario JSON the PS runner saw
-    mount-stdout.txt        mount-cmd stdout (when [mount] declared)
-    mount-stderr.txt        mount-cmd stderr
-    op-trace.jsonl          one line per op: input, output, verdict
-    opNN-stdout.txt         per-op stdout (template ops only)
-    opNN-stderr.txt
-    post-verify-stdout.txt  (when [post_verify] runs)
-    post-verify-stderr.txt
-    ps-stdout.txt           full PowerShell stdout (for verdict markers)
-    ps-stderr.txt
-    result.json             machine-readable verdict
+test-diagnostics/
+  matrix/
+    run-manifest.json     timestamp, host OS, consumer git SHA, project, scenario counts
+    results.json          every scenario's result.json, sorted by name
+    <scenario-name>/
+      result.json         name, status, error (the failing step's output tail), diag_dir, duration_secs
+      recipe.json         every executed step's result, and overall_passed
+      step-NN/
+        step.json         op, host, the resolved command, exit code, expected exit, duration, skip or error
+        stdout.txt
+        stderr.txt
+  vm-lease-heartbeat.log  the VM-workdir lease's renewals
 ```
 
-The persistent contract is `manifest.json` + `op-trace.jsonl`. Together
-they let an agent walking into a diag dir cold reconstruct what was
-tested and which op failed without re-running anything.
+`step.json` with its `stdout.txt` and `stderr.txt` is the persistent
+contract: an agent walking into a diag dir cold can see exactly which
+command ran where, what it printed and how it exited, without re-running
+anything. A failing scenario's line in the transcript also carries the last
+4 KB of that step's stderr and stdout.
 
 ## Concurrency
 
 - **Multiple agents** can claim from the same matrix.json in parallel.
-  The atomic-rename + read-back-verify pattern prevents two agents
-  taking the same scenario.
-- **Per VM**: scenarios serialise via `MOUNT_LOCK` + `--test-threads=1`.
+  The locked transaction above prevents two agents taking the same
+  scenario.
+- **Per guest**: scenarios run up to `max_parallel` at once, with
+  `exclusive_group` serialising those that share a resource (see
+  [Parallelism](#parallelism)).
 - **Per VM workdir**: `run-tests.sh` acquires a renewable lease before
   reinstall, ship, or matrix work. A Windows file-share gate serializes
   acquisition, renewal, and release. A second gate stays held across each
@@ -123,23 +145,26 @@ tested and which op failed without re-running anything.
 
 - `reset-non-passed.sh` idempotently resets every non-`passed-*`
   scenario back to `pending`. Use between passes.
-- `run-scenario.ps1` cleans stale mount processes via `Stop-Process
-  -Force` at the start of each scenario; no VM power cycle is needed
-  in the normal failure modes.
+- Each Windows-side op unmounts in a `finally`, and a mount that never
+  signals ready is stopped with `Stop-Process -Force`, so a failed step
+  does not leave its volume mounted for the next one.
+- On the QEMU guest, `local-vm.py down` and the next cold `up` return
+  the guest to its reset point, discarding anything a run left on its
+  disk. Within one boot, runs see what earlier runs left behind.
 
-## Adapter model
+## Ops model
 
-Two ways to plug behaviour in (the entire reason this harness was
-extracted):
+Behaviour comes from configuration, which is the reason this harness was
+extracted. The consumer's `fs-windows-test-harness.toml` declares each op
+in `[ops]` as a command template. The runner fills in the
+[substitution tokens](vocabulary.md) and runs the command where the recipe
+step's `host` says: a local subprocess (`cmd.exe` when the host is
+Windows) or one SSH command to the guest's PowerShell. `ship-to-vm` and
+`ship-to-host` are built in and copy images with scp through a staging
+name guarded by the VM-workdir lease. The harness also ships Windows-side op
+scripts (`scripts/vm/win-*.ps1`) and host-side verifiers
+(`scripts/host/verify-*.sh`) that a consumer's ops can call.
 
-- **Option A (default) -- TomlAdapter.** `harness.toml [ops]` declares
-  shell command templates per op type. The runner substitutes
-  per-scenario tokens and runs them on the VM via `cmd /c`. This is
-  enough for any project whose driver is a CLI binary; both NTFS and
-  ext4 ports fit cleanly here.
-
-- **Option B (escape hatch) -- Adapter trait.** Consumers can link the
-  runner crate as a library and `impl Adapter for MyDriver`. For ops
-  that need real Rust (FFI probe, in-process mount test) the trait
-  method runs in-VM Rust instead of shelling out. Less common;
-  documented as the escape hatch, not the default.
+The runner crate can be used as a library (`Harness::load`,
+`run_recipe`), but it has no adapter trait: a driver plugs in through its
+CLI binary and the op templates.
