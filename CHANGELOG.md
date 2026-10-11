@@ -3,6 +3,11 @@
 All notable changes to fs-windows-test-harness will land here. The format
 loosely follows Keep a Changelog; semver applies from `2.0.0` onward.
 
+Changes not yet released are fragments in [`changelog.d/`](changelog.d/), one per
+pull request; a release gathers them into a section here.
+
+## [Unreleased]
+
 ## v4.5.0 — 2026-10-11
 
 ### Changed (consumers that install tools into the QEMU guest must save them)

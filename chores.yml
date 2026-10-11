@@ -116,6 +116,11 @@ tasks:
     cmds:
       - scripts/task.sh agents-core agents-core 20 1000 -- bash tests/agents-core.sh
 
+  changelog:
+    desc: Unreleased changelog entries are changelog.d/ fragments, and the check refuses an entry written into CHANGELOG.md (CI job `state-machine`)
+    cmds:
+      - scripts/task.sh changelog changelog 20 1000 -- bash tests/changelog-fragments.sh
+
   local-vm:
     desc: QEMU lifecycle, media verification, locking and SSH transport checks (no VM needed)
     cmds:
