@@ -9,7 +9,7 @@
 //! invokes local subprocesses for host-steps, and SSHes one command
 //! per vm-step.
 //!
-//! Per-step diag is written under `<diag_dir>/step-<NN>-<op>/` —
+//! Per-step diag is written under `<diag_dir>/step-<NN>/` —
 //! one log file each for stdout, stderr, and a JSON record carrying
 //! the resolved command, exit code, duration, and host.
 
