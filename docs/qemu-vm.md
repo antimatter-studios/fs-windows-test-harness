@@ -6,8 +6,10 @@ commands, media, state layout, guest and SSH transport; the accelerator is the
 only per-host difference, chosen automatically. The scenario runner, recipes,
 Windows operations, assertions and CI Windows runner remain the existing
 harness. This is a guest provider: prepare once, start when needed, run many
-matrices, and shut down explicitly. Tests do not reboot the VM. It is the
-default local Windows VM; [vm-setup.md](vm-setup.md) keeps the VMware
+matrices, and shut down explicitly. Tests do not reboot the VM. Every start
+begins from a fixed [reset point](#reset-point), and every shutdown discards
+what that boot wrote, so the guest disk does not grow from run to run. It is
+the default local Windows VM; [vm-setup.md](vm-setup.md) keeps the VMware
 alternative.
 
 ## Prerequisites
@@ -108,7 +110,9 @@ prototype. `provision` sets RemoteSigned for the dedicated account, performs
 normal evaluation activation, installs WinFsp (including developer files),
 disables AC idle sleep, and ejects both installer discs. This base guest does
 not install every consumer's build dependencies: provision its Rust toolchain,
-compiler and helper programs according to that consumer's setup instructions.
+compiler and helper programs according to that consumer's setup instructions,
+then shut down with `down --save` so they become part of the reset point.
+A plain `down` discards them.
 IoT evaluation media may lack `winget`; verify that prerequisite before using
 a consumer's winget-based installer.
 
@@ -160,7 +164,7 @@ HVF that path powered the guest off but Windows recorded an unexpected
 shutdown (Kernel-Power 41, EventLog 6008) on its next boot, while its own
 shutdown booted clean. QEMU is daemonized, with no system service or
 autostart installed. A host restart or stopping its owning service can stop
-it; ordinary `up` restarts the persistent disk.
+it; ordinary `up` starts it again from the reset point.
 
 A Mac idle-sleeps on a timer, and a sleeping host freezes the guest. On macOS,
 `wait`, `provision`, `down`, `exec` and `ssh` therefore hold an idle-sleep
@@ -174,6 +178,45 @@ files. SSH forwards **127.0.0.1 only**. QMP and VNC use private Unix sockets.
 Windows logs are in `C:\fswth-bootstrap`; host logs are `qemu.log`,
 `serial.log` and `provision.log` in the state directory. Initial SSH host-key
 trust is scoped to that private instance; later key changes are refused.
+
+## Reset point
+
+Installation and `provision` write the guest disk, `windows.qcow2`, directly.
+From the first cold `up` after provisioning, that disk and its UEFI variables
+(`uefi-vars.fd`) are the **reset point**. QEMU runs the guest on a throwaway
+overlay of both (`run.qcow2`, `run-vars.fd`) and opens the base read-only.
+`down` deletes the overlay once Windows has shut down. A cold `up` creates it
+again, empty, so a boot that ended without `down` (QEMU killed, host
+restarted) is discarded too. `up` on a running guest reuses it, so the runs
+within one boot still see what earlier runs left behind.
+
+Without the overlay the disk only grows: the qcow2 keeps every cluster Windows
+has ever written. One guest's `windows.qcow2` reached 45.4 GiB while Windows
+used 13.8 GB of it.
+
+To keep a change, such as a consumer's toolchain or a Windows setting, make it
+on the running guest, then:
+
+```sh
+python3 scripts/local-vm.py down --save
+```
+
+`--save` first asks Windows to retrim C: (`Optimize-Volume -ReTrim`). The
+disk's `discard=unmap` turns each trimmed range into zeroed clusters. After
+shutdown, `qemu-img convert` flattens the overlay and its base into a new
+`windows.qcow2`, leaving those zeros out. The old base is replaced only once
+the copy is complete, so saving needs free host space for that copy. A failed
+retrim saves nothing and leaves the guest running; a failed copy leaves the
+old reset point in place.
+
+Measured on the macOS validation guest on 2026-10-11: saving took 25 seconds
+and shrank its disk from 45.4 GiB to 11.3 GiB. The guest then booted from the
+new reset point and passed `chore smoke`, and that boot's 112 MiB overlay was
+deleted at `down`.
+
+A guest still running from provisioning, or started by an earlier harness
+version, runs on its base disk. Its plain `down` keeps everything, as before;
+`down --save` compacts it in place.
 
 ## Acceptance
 
