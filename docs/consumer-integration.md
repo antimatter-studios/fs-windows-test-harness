@@ -6,9 +6,11 @@ first time; you can skim it on subsequent project setups.
 ## What you need before starting
 
 - A Rust filesystem driver (or formatter) project with a CLI binary.
-- A Windows VM reachable over SSH. [`vm-setup.md`](./vm-setup.md) sets one up,
-  including the fixed host-only address `VM_HOST` should name. Step 4
-  provisions its Rust toolchain and packages.
+- A Windows VM reachable over SSH. The default is the persistent QEMU guest
+  in [`qemu-vm.md`](./qemu-vm.md), run through `local-vm.py exec --` with
+  `VM_HOST=fswth-local`. [`vm-setup.md`](./vm-setup.md) sets up the VMware
+  alternative, including the fixed host-only address `VM_HOST` should name.
+  Step 4 provisions the guest's Rust toolchain and packages.
 - The driver's binary either prebuilt and synced onto the VM, or
   buildable via `cargo build --release` on the VM (the harness can do
   the sync + build for you, but does not require it).

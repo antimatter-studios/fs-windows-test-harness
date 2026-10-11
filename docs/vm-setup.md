@@ -1,8 +1,10 @@
 # Setting up the Windows VM
 
-For the persistent **Linux ARM64 QEMU/KVM** setup, including Raspberry Pi 5,
-use [qemu-vm.md](qemu-vm.md). This page retains the VMware setup while the
-replacement is validated. macOS QEMU support is a subsequent step.
+The default local Windows VM is the persistent QEMU guest in
+[qemu-vm.md](qemu-vm.md), on Apple Silicon macOS (HVF) and Linux ARM64 (KVM),
+including Raspberry Pi 5. This page keeps the hand-built VMware Fusion setup
+as an alternative. Parity between the two was never measured: on the
+2026-10-10 Mac the VMware guest could not attach VHDs reliably.
 
 Everything the harness needs from the Windows side, from an empty
 hypervisor to `ssh <user>@<vm> "echo ok"` answering. Do this once per
