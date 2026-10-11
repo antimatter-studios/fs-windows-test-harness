@@ -1,9 +1,10 @@
 //! Diagnostic reporting types.
 //!
-//! The persistent contract is `manifest.json` per scenario plus
-//! `results.json` aggregated across the run; together they let an
-//! agent reconstruct what was tested, which op failed, and what was
-//! observed without re-running anything.
+//! The persistent contract is `result.json` and `recipe.json` per
+//! scenario, `step-NN/step.json` with its stdout and stderr per step, and
+//! `results.json` aggregated across the run; together they let an agent
+//! reconstruct what was tested, which step failed, and what was observed
+//! without re-running anything.
 
 use serde::{Deserialize, Serialize};
 

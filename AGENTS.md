@@ -266,9 +266,11 @@ on a throwaway runner.
   consumer's `fs-windows-test-harness.toml`, not in `scripts/` or `runner/`.
   A new capability is a new substitution token or op kind that any driver
   could use (`docs/vocabulary.md`).
-- **Scenarios run one at a time.** Drive-letter assignment and WinFsp host
-  state are process-global on Windows, so the runner serialises scenarios and
-  forces `--test-threads=1`. Parallelism is separate VMs, never threads.
+- **Scenarios run in parallel only as far as the consumer allows.**
+  `[runner].max_parallel` defaults to 1; a number or `"drive-letters"` raises
+  it, and `exclusive_group` serialises scenarios that share a resource.
+  Drive letters are not memory: a guest can run out of RAM long before it
+  runs out of letters.
 - **The host-side shell must run on macOS's bash 3.2**: no associative
   arrays, no `mapfile`. `tests/state-machine.sh` is written to that floor.
 - **The VM-workdir lease is fenced.** A live `run-tests.sh` renews its lock;

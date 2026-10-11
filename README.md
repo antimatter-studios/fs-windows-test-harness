@@ -36,7 +36,7 @@ and [erofs-win-driver](https://github.com/antimatter-studios/erofs-win-driver).
 
 | Path | What lives there |
 | --- | --- |
-| `runner/` | Rust crate. `lib.rs` exposes the `Harness` / `Adapter` API; `bin/run-matrix.rs` is the [libtest-mimic](https://github.com/LukasKalbertodt/libtest-mimic) driver. |
+| `runner/` | Rust crate, run on the host. `lib.rs` exposes `Harness::load` and `run_recipe`; `bin/run-matrix.rs` is the [libtest-mimic](https://github.com/LukasKalbertodt/libtest-mimic) driver that runs each scenario's recipe, sending its `vm` steps to the guest over SSH. |
 | `scripts/` | Host-side bash. `run-tests.sh` is the single entrypoint (bootstrap, preflight, ship, run, diag-pull); `claim-scenario.sh`, `update-scenario-status.sh` and `reset-non-passed.sh` are the state-machine helpers. |
 | `scripts/local-vm.py`, `scripts/local-vm/` | The QEMU Windows guest provider: pinned media manifest, unattended answer file, bootstrap and provisioning scripts, and the `prepare` / `up` / `wait` / `exec` / `down` lifecycle. |
 | `scripts/vm/` | Windows-side PowerShell: one script per op (list, read, write, mkdir, rename, unlink, rmdir, chkdsk), the VM-workdir run lock and the chkdsk verdict. |
