@@ -6,7 +6,9 @@ commands, media, state layout, guest and SSH transport; the accelerator is the
 only per-host difference, chosen automatically. The scenario runner, recipes,
 Windows operations, assertions and CI Windows runner remain the existing
 harness. This is a guest provider: prepare once, start when needed, run many
-matrices, and shut down explicitly. Tests do not reboot the VM.
+matrices, and shut down explicitly. Tests do not reboot the VM. It is the
+default local Windows VM; [vm-setup.md](vm-setup.md) keeps the VMware
+alternative.
 
 ## Prerequisites
 
@@ -209,7 +211,7 @@ prove the corrected Mac run, or validate a newer harness revision after
 integration with `main`. Virtiofs is a separate experimental branch; SCP is
 the default transport here.
 
-## MacBook, Pi and VMware retirement
+## MacBook, Pi and VMware
 
 A MacBook runs the same provider locally: same commands, same state layout,
 HVF in place of KVM. Install its dependencies as in Prerequisites and follow
@@ -246,6 +248,12 @@ Before deprecating VMware, retain evidence for these checks:
 5. Preserve all step diagnostics and hashes of the images used for supplemental
    investigations. Verify any lifecycle calls in consumer task definitions:
    some still invoke VMware even though the harness transport uses SSH.
+
+Since v4.4.0 this provider is the default local Windows VM. The corrected
+matrix passed all 72 scenarios over scp on both hosts, as the reports above
+record. Check 3 was never run: the VMware guest could not attach VHDs
+reliably. VMware therefore stays documented in [vm-setup.md](vm-setup.md) as
+an alternative, not retired, with its parity unmeasured.
 
 A successful QEMU run demonstrates that provider's behavior. A matching
 VMware run establishes the comparison. Native Windows CI remains a third

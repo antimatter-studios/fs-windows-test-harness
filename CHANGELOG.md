@@ -3,11 +3,11 @@
 All notable changes to fs-windows-test-harness will land here. The format
 loosely follows Keep a Changelog; semver applies from `2.0.0` onward.
 
-## [Unreleased]
+## v4.4.0 — 2026-10-11
 
 ### Added
 
-- An opt-in persistent Windows ARM64 QEMU/KVM guest for Linux ARM64, with
+- A persistent Windows ARM64 QEMU/KVM guest for Linux ARM64, with
   pinned evaluation downloads, unattended installation media, SSH and WinFsp
   provisioning, explicit VM lifecycle commands, and transport wrappers for
   the existing harness. See `docs/qemu-vm.md`.
@@ -65,11 +65,21 @@ loosely follows Keep a Changelog; semver applies from `2.0.0` onward.
 
 ### Changed
 
+- **The QEMU guest is the default local Windows VM.** The Quickstart,
+  `docs/consumer-integration.md`, `docs/vm-setup.md` and `docs/qemu-vm.md`
+  send a new consumer to `scripts/local-vm.py`, one setup for Apple Silicon
+  macOS and Linux ARM64. The hand-built VMware Fusion guest stays documented
+  as an alternative, with its parity unmeasured: on the 2026-10-10 Mac it
+  could not attach VHDs reliably, so the comparison run was never possible.
+  The harness itself starts neither VM, so a consumer with a reachable
+  `VM_HOST` needs no change. **A consumer whose own tasks start VMware must
+  switch them to `local-vm.py up`, `wait` and `exec --` to use the QEMU
+  guest.**
 - **The agents-core check runs in place from rust-fs-core.** The copy in
   `scripts/agents-core-check.sh` is gone; `tests/agents-core.sh` runs core's
   from `$FS_CORE_ROOT` (else `../rust-fs-core`), and the pinned core moves
-  from v0.2.13 to v0.3.3, the release whose check reads the guide of the
-  repository it is run for (rust-fs-core#212).
+  from v0.2.13 to v0.3.8. v0.3.3 is the first release whose check reads the
+  guide of the repository it is run for (rust-fs-core#212).
 
 ## v4.3.1 — 2026-10-03
 
