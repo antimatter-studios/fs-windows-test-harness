@@ -3,6 +3,8 @@
 Silicon macOS/HVF (Python 3.11+).
 
 VM lifecycle is explicit. Running a harness command leaves the guest running.
+A provisioned guest boots from its reset point: every cold start and every
+shutdown discards what the previous boot wrote, unless down --save keeps it.
 State, media, credentials and logs stay outside the checkout. Both hosts use
 the same tools, commands and state layout; only the accelerator differs.
 """
@@ -52,6 +54,12 @@ SYSTEM_FIRMWARE = (
     Path("/usr/share/AAVMF/AAVMF_CODE.fd"),
     Path("/usr/share/AAVMF/AAVMF_VARS.fd"),
 )
+# The reset point is the base disk and its UEFI variables. A provisioned
+# guest runs on a throwaway overlay of both, so a test run never grows the
+# base. Without it the qcow2 keeps every cluster Windows ever wrote: one
+# guest reached 45.4 GiB while Windows used 13.8 GB (macOS, 2026-10-11).
+BASE_DISK, BASE_VARS = "windows.qcow2", "uefi-vars.fd"
+RUN_DISK, RUN_VARS = "run.qcow2", "run-vars.fd"
 
 
 def run(argv, **kwargs):
@@ -406,6 +414,11 @@ def qemu_command(state, config, install=False):
     runtime = runtime_dir(state)
     # State prepared before HVF support has no accelerator: it was KVM.
     accel = config.get("accelerator", "kvm")
+    disk, variables = (
+        (RUN_DISK, RUN_VARS)
+        if config.get("disk") == "overlay"
+        else (BASE_DISK, BASE_VARS)
+    )
     command = [
         "qemu-system-aarch64",
         "-name",
@@ -421,7 +434,7 @@ def qemu_command(state, config, install=False):
         "-drive",
         f"if=pflash,format=raw,readonly=on,file={state / 'uefi-code.fd'}",
         "-drive",
-        f"if=pflash,format=raw,file={state / 'uefi-vars.fd'}",
+        f"if=pflash,format=raw,file={state / variables}",
         "-device",
         "ramfb",
         "-device",
@@ -443,8 +456,10 @@ def qemu_command(state, config, install=False):
         "-pidfile",
         str(runtime / "vm.pid"),
         "-daemonize",
+        # discard=unmap passes Windows' TRIM to the qcow2, so freed clusters
+        # read as zeros and are dropped when down --save flattens the disk.
         "-drive",
-        f"if=none,id=system,format=qcow2,file={state / 'windows.qcow2'}",
+        f"if=none,id=system,format=qcow2,discard=unmap,file={state / disk}",
         "-device",
         "nvme,drive=system,serial=FSWTHBOOT,bootindex=1",
         "-netdev",
@@ -467,6 +482,65 @@ def qemu_command(state, config, install=False):
     return command
 
 
+def discard(state):
+    for name in (RUN_DISK, RUN_VARS):
+        (state / name).unlink(missing_ok=True)
+
+
+def reset(state):
+    # Recreating the overlay replaces the last boot's. A relative backing
+    # name keeps the state directory movable.
+    run(
+        [
+            "qemu-img",
+            "create",
+            "-q",
+            "-f",
+            "qcow2",
+            "-F",
+            "qcow2",
+            "-b",
+            BASE_DISK,
+            state / RUN_DISK,
+        ],
+        timeout=30,
+    )
+    shutil.copyfile(state / BASE_VARS, state / RUN_VARS)
+
+
+def save(state, config):
+    """Make the stopped guest's disk the new reset point, flattened."""
+    overlay = config.get("disk") == "overlay"
+    new = state / (BASE_DISK + ".new")
+    new.unlink(missing_ok=True)
+    try:
+        # Flattening copies only allocated, non-zero clusters: everything
+        # Windows trimmed is left out, so the reset point is also compacted.
+        run(
+            [
+                "qemu-img",
+                "convert",
+                "-O",
+                "qcow2",
+                state / (RUN_DISK if overlay else BASE_DISK),
+                new,
+            ],
+            timeout=3600,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        new.unlink(missing_ok=True)
+        kept = (
+            f"this boot's changes stay in {state / RUN_DISK} only until the next up"
+            if overlay
+            else "the reset point is unchanged"
+        )
+        raise RuntimeError(f"Saving the reset point failed; {kept}") from exc
+    if overlay:
+        shutil.copyfile(state / RUN_VARS, state / (BASE_VARS + ".new"))
+        (state / (BASE_VARS + ".new")).replace(state / BASE_VARS)
+    new.replace(state / BASE_DISK)
+
+
 def up(state, config, install=False):
     status = running(state)
     if status is not None:
@@ -480,11 +554,16 @@ def up(state, config, install=False):
         )
     if not install and not config["install_started"]:
         raise RuntimeError("First boot needs up --install")
+    # Installation and provisioning build the reset point itself; every cold
+    # start after that begins from it, whatever the last boot left behind.
+    config["disk"] = "overlay" if config["provisioned"] else "base"
+    if config["disk"] == "overlay":
+        reset(state)
     command = qemu_command(state, config, install)
     # Mark before launching: a killed command must not allow a destructive retry.
     if install:
         config["install_started"] = True
-        write_json(state / "vm.json", config)
+    write_json(state / "vm.json", config)
     with (state / "qemu.log").open("a") as log:
         try:
             run(command, stdout=log, stderr=subprocess.STDOUT, timeout=30)
@@ -573,10 +652,34 @@ def provision(state, config):
     )
 
 
-def down(state, timeout):
+def down(state, timeout, config=None, keep=False):
     if running(state) is None:
+        if keep:
+            raise RuntimeError(
+                "VM is stopped, so there is nothing to save: up, make the changes, then down --save"
+            )
+        # A boot that ended without down (host restart, killed QEMU) left
+        # its overlay behind; it would only be discarded by the next up.
+        discard(state)
         print("VM is already stopped")
         return
+    if keep:
+        # Trimmed clusters read as zeros, which save() leaves out.
+        try:
+            ssh(
+                state,
+                "Optimize-Volume -DriveLetter C -ReTrim -ErrorAction Stop",
+                capture_output=True,
+                timeout=1200,
+            )
+        except (
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+            OSError,
+        ) as exc:
+            raise RuntimeError(
+                "Windows could not retrim C:; nothing was saved and the VM is left running"
+            ) from exc
     # Windows' own shutdown is clean; the ACPI power button left it dirty
     # (Kernel-Power 41 and EventLog 6008 on the next boot, measured on HVF).
     try:
@@ -595,7 +698,17 @@ def down(state, timeout):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if running(state) is None:
-            print("VM shut down cleanly")
+            config = config or {}
+            if keep:
+                save(state, config)
+            discard(state)
+            if keep:
+                outcome = "; this boot is the new reset point"
+            elif config.get("disk") == "overlay":
+                outcome = "; this boot's changes are discarded"
+            else:
+                outcome = ""
+            print(f"VM shut down cleanly{outcome}")
             return
         time.sleep(2)
     raise TimeoutError("Windows did not shut down; left running, no forced kill")
@@ -682,6 +795,12 @@ def parse_args(argv=None):
     for name, seconds in (("wait", 1800), ("down", 180)):
         cmd = sub.add_parser(name)
         cmd.add_argument("--timeout", type=positive, default=seconds)
+        if name == "down":
+            cmd.add_argument(
+                "--save",
+                action="store_true",
+                help="keep this boot's changes as the new reset point",
+            )
     sub.add_parser("status")
     sub.add_parser(
         "boot-installer",
@@ -736,7 +855,7 @@ def main(argv=None):
         elif args.action == "provision":
             provision(state, config)
         elif args.action == "down":
-            down(state, args.timeout)
+            down(state, args.timeout, config, args.save)
         elif args.action == "boot-installer":
             boot_installer(state, config)
         elif args.action == "screenshot":

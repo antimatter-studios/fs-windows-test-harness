@@ -3,6 +3,27 @@
 All notable changes to fs-windows-test-harness will land here. The format
 loosely follows Keep a Changelog; semver applies from `2.0.0` onward.
 
+## v4.5.0 — 2026-10-11
+
+### Changed (consumers that install tools into the QEMU guest must save them)
+
+- **The QEMU guest starts from a fixed reset point and discards each boot
+  when it stops.** After provisioning, `local-vm.py up` runs the guest on a
+  throwaway overlay of its disk and UEFI variables, and `down` deletes that
+  overlay, so test runs no longer grow `windows.qcow2`: one guest had reached
+  45.4 GiB while Windows used 13.8 GB. A cold `up` also discards a boot that
+  ended without `down`. **Anything installed after provisioning, such as a
+  consumer's toolchain or helper programs, is discarded at the next `down`
+  unless that shutdown is `down --save`.**
+- `down --save` keeps the boot as the new reset point. It retrims C: inside
+  Windows, shuts down, and flattens the disk with `qemu-img convert`, which
+  leaves the trimmed space out. The guest disk is now attached with
+  `discard=unmap` so that Windows' trims reach the qcow2. On the macOS
+  validation guest, saving took 25 seconds and shrank the disk from 45.4 GiB
+  to 11.3 GiB; that guest then passed `chore smoke`. A guest still running on
+  its base disk, from provisioning or from an earlier harness version, keeps
+  its changes on a plain `down` and is compacted in place by `down --save`.
+
 ## v4.4.0 — 2026-10-11
 
 ### Added

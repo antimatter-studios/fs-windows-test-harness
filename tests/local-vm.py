@@ -313,6 +313,237 @@ class LocalVM(unittest.TestCase):
             vm.down(self.state, 1)
         qmp.assert_called_once_with(self.state, "system_powerdown")
 
+    def guest_files(self, overlay=True):
+        files = {"windows.qcow2": b"reset point", "uefi-vars.fd": b"reset vars"}
+        if overlay:
+            files.update({"run.qcow2": b"last boot", "run-vars.fd": b"last vars"})
+        for name, body in files.items():
+            (self.state / name).write_bytes(body)
+
+    def read(self, name):
+        path = self.state / name
+        return path.read_bytes() if path.exists() else None
+
+    def test_disk_and_variables_follow_the_reset_point_mode(self):
+        for disk, image, variables in (
+            ("overlay", "run.qcow2", "run-vars.fd"),
+            ("base", "windows.qcow2", "uefi-vars.fd"),
+        ):
+            self.config["disk"] = disk
+            with (
+                self.subTest(disk=disk),
+                patch.object(vm, "runtime_dir", return_value=self.state),
+            ):
+                text = " ".join(vm.qemu_command(self.state, self.config))
+                self.assertIn(
+                    f"format=qcow2,discard=unmap,file={self.state / image}", text
+                )
+                self.assertIn(f"format=raw,file={self.state / variables}", text)
+                other = "windows.qcow2" if disk == "overlay" else "run.qcow2"
+                self.assertNotIn(other, text)
+
+    def test_cold_start_of_a_provisioned_guest_begins_at_the_reset_point(self):
+        self.guest_files()
+        self.config.update(install_started=True, provisioned=True)
+        calls = []
+
+        def run(argv, **kwargs):
+            calls.append([str(x) for x in argv])
+            if argv[:2] == ["qemu-img", "create"]:
+                Path(argv[-1]).write_bytes(b"empty overlay")
+
+        with (
+            patch.object(vm, "running", return_value=None),
+            patch.object(vm, "runtime_dir", return_value=self.state),
+            patch.object(vm, "run", side_effect=run),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            vm.up(self.state, self.config)
+        create, launch = calls
+        self.assertEqual(
+            create,
+            [
+                "qemu-img",
+                "create",
+                "-q",
+                "-f",
+                "qcow2",
+                "-F",
+                "qcow2",
+                "-b",
+                "windows.qcow2",
+                str(self.state / "run.qcow2"),
+            ],
+        )
+        self.assertEqual(self.read("run.qcow2"), b"empty overlay")
+        self.assertEqual(self.read("run-vars.fd"), b"reset vars")
+        self.assertEqual(self.read("windows.qcow2"), b"reset point")
+        self.assertIn(f"file={self.state / 'run.qcow2'}", " ".join(launch))
+        self.assertEqual(vm.load_config(self.state)["disk"], "overlay")
+
+    def test_installation_and_provisioning_write_the_reset_point_itself(self):
+        self.guest_files(overlay=False)
+        self.config["install_started"] = True
+        with (
+            patch.object(vm, "running", return_value=None),
+            patch.object(vm, "runtime_dir", return_value=self.state),
+            patch.object(vm, "run") as run,
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            vm.up(self.state, self.config)
+        run.assert_called_once()
+        self.assertIn(
+            f"file={self.state / 'windows.qcow2'}", " ".join(run.call_args.args[0])
+        )
+        self.assertFalse((self.state / "run.qcow2").exists())
+        self.assertEqual(vm.load_config(self.state)["disk"], "base")
+
+    def test_shutdown_discards_the_boot_and_keeps_the_reset_point(self):
+        self.guest_files()
+        self.config["disk"] = "overlay"
+        with (
+            patch.object(vm, "running", side_effect=[{"running": True}, None]),
+            patch.object(vm, "ssh") as ssh,
+            contextlib.redirect_stdout(io.StringIO()) as stdout,
+        ):
+            vm.down(self.state, 10, self.config)
+        self.assertEqual(ssh.call_count, 1)
+        self.assertIsNone(self.read("run.qcow2"))
+        self.assertIsNone(self.read("run-vars.fd"))
+        self.assertEqual(self.read("windows.qcow2"), b"reset point")
+        self.assertEqual(self.read("uefi-vars.fd"), b"reset vars")
+        self.assertIn("changes are discarded", stdout.getvalue())
+
+    def test_stopped_guest_has_a_leftover_boot_discarded(self):
+        # QEMU killed or the host restarted: no down ran for that boot.
+        self.guest_files()
+        with (
+            patch.object(vm, "running", return_value=None),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            vm.down(self.state, 10, self.config)
+        self.assertIsNone(self.read("run.qcow2"))
+        self.assertEqual(self.read("windows.qcow2"), b"reset point")
+        with (
+            patch.object(vm, "running", return_value=None),
+            self.assertRaisesRegex(RuntimeError, "nothing to save"),
+        ):
+            vm.down(self.state, 10, self.config, keep=True)
+
+    def test_save_retrims_before_shutdown_then_flattens_the_boot(self):
+        self.guest_files()
+        self.config["disk"] = "overlay"
+        calls = []
+
+        def run(argv, **kwargs):
+            calls.append([str(x) for x in argv])
+            self.assertEqual(self.read("windows.qcow2"), b"reset point")
+            Path(argv[-1]).write_bytes(b"flattened")
+
+        with (
+            patch.object(vm, "running", side_effect=[{"running": True}, None]),
+            patch.object(vm, "ssh") as ssh,
+            patch.object(vm, "run", side_effect=run),
+            contextlib.redirect_stdout(io.StringIO()) as stdout,
+        ):
+            vm.down(self.state, 10, self.config, keep=True)
+        retrim, shutdown = (call.args[1] for call in ssh.call_args_list)
+        self.assertIn("Optimize-Volume -DriveLetter C -ReTrim", retrim)
+        self.assertIn("shutdown.exe", shutdown)
+        self.assertEqual(
+            calls,
+            [
+                [
+                    "qemu-img",
+                    "convert",
+                    "-O",
+                    "qcow2",
+                    str(self.state / "run.qcow2"),
+                    str(self.state / "windows.qcow2.new"),
+                ]
+            ],
+        )
+        self.assertEqual(self.read("windows.qcow2"), b"flattened")
+        self.assertEqual(self.read("uefi-vars.fd"), b"last vars")
+        for name in (
+            "run.qcow2",
+            "run-vars.fd",
+            "windows.qcow2.new",
+            "uefi-vars.fd.new",
+        ):
+            self.assertIsNone(self.read(name), name)
+        self.assertIn("new reset point", stdout.getvalue())
+
+    def test_saving_a_guest_on_its_base_disk_compacts_it_in_place(self):
+        # A guest still running from provisioning, or started before reset
+        # points existed, has no overlay: its base is flattened instead.
+        self.guest_files(overlay=False)
+
+        def run(argv, **kwargs):
+            Path(argv[-1]).write_bytes(b"compacted")
+
+        with (
+            patch.object(vm, "running", side_effect=[{"running": True}, None]),
+            patch.object(vm, "ssh"),
+            patch.object(vm, "run", side_effect=run) as convert,
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            vm.down(self.state, 10, {}, keep=True)
+        self.assertEqual(convert.call_args.args[0][4], self.state / "windows.qcow2")
+        self.assertEqual(self.read("windows.qcow2"), b"compacted")
+        self.assertEqual(self.read("uefi-vars.fd"), b"reset vars")
+
+    def test_failed_retrim_saves_nothing_and_leaves_the_guest_running(self):
+        self.guest_files()
+        self.config["disk"] = "overlay"
+        with (
+            patch.object(vm, "running", return_value={"running": True}),
+            patch.object(
+                vm, "ssh", side_effect=subprocess.CalledProcessError(1, "ssh")
+            ) as ssh,
+            patch.object(vm, "qmp") as qmp,
+            patch.object(vm, "run") as run,
+            self.assertRaisesRegex(RuntimeError, "retrim.*left running"),
+        ):
+            vm.down(self.state, 10, self.config, keep=True)
+        ssh.assert_called_once()
+        qmp.assert_not_called()
+        run.assert_not_called()
+        self.assertEqual(self.read("run.qcow2"), b"last boot")
+        self.assertEqual(self.read("windows.qcow2"), b"reset point")
+
+    def test_failed_flatten_keeps_the_reset_point_and_the_boot(self):
+        self.guest_files()
+        self.config["disk"] = "overlay"
+
+        def run(argv, **kwargs):
+            Path(argv[-1]).write_bytes(b"partial")
+            raise subprocess.CalledProcessError(1, "qemu-img")
+
+        with (
+            patch.object(vm, "running", side_effect=[{"running": True}, None]),
+            patch.object(vm, "ssh"),
+            patch.object(vm, "run", side_effect=run),
+            self.assertRaisesRegex(RuntimeError, "run.qcow2 only until the next up"),
+        ):
+            vm.down(self.state, 10, self.config, keep=True)
+        self.assertEqual(self.read("windows.qcow2"), b"reset point")
+        self.assertEqual(self.read("uefi-vars.fd"), b"reset vars")
+        self.assertEqual(self.read("run.qcow2"), b"last boot")
+        self.assertIsNone(self.read("windows.qcow2.new"))
+
+    def test_shutdown_timeout_discards_nothing(self):
+        self.guest_files()
+        self.config["disk"] = "overlay"
+        with (
+            patch.object(vm, "running", return_value={"running": True}),
+            patch.object(vm, "ssh"),
+            patch.object(vm.time, "monotonic", side_effect=[0, 2]),
+            self.assertRaises(TimeoutError),
+        ):
+            vm.down(self.state, 1, self.config)
+        self.assertEqual(self.read("run.qcow2"), b"last boot")
+
     def test_configuration_and_argument_validation(self):
         with self.assertRaisesRegex(RuntimeError, "prepare first"):
             vm.load_config(self.state)
@@ -327,6 +558,8 @@ class LocalVM(unittest.TestCase):
         self.assertEqual(
             vm.parse_args(["exec", "--", "echo", "a b"]).command, ["--", "echo", "a b"]
         )
+        self.assertFalse(vm.parse_args(["down"]).save)
+        self.assertTrue(vm.parse_args(["down", "--save"]).save)
 
     def test_missing_tool_fails_with_prerequisite(self):
         with (
