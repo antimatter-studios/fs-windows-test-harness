@@ -29,7 +29,7 @@ permissions:
 # v0.2.11 the script does not exist at all, and v0.3.3 is the release whose
 # agents-core check reads the guide of the repository it is run for.
 env:
-  FS_CORE_REF: v0.3.8
+  FS_CORE_REF: v0.3.11
 
 jobs:
   # Does this change need the full pipeline? rust-fs-core's
@@ -230,6 +230,8 @@ jobs:
       # self-test, so it rides in this job too.
       - name: agent-guide self-test (the shared block is intact; drift is refused)
         run: bash scripts/task.sh agents-core agents-core 20 1000 -- bash tests/agents-core.sh
+      - name: changelog self-test (fragments pass; an entry in CHANGELOG.md is refused)
+        run: bash scripts/task.sh changelog changelog 20 1000 -- bash tests/changelog-fragments.sh
 
       - name: local QEMU lifecycle checks (no guest needed)
         run: bash scripts/task.sh local-vm local-vm 100 9000 -- python3 -B tests/local-vm.py
