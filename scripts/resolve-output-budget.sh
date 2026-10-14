@@ -14,7 +14,7 @@
 # consistent, nothing compared them, and a consumer reading one harness's
 # README got the other's behaviour.
 #
-# This harness is not a driver: it has no `am-fs-core` dependency and cargo
+# This harness is not a driver: it has no `rust-fs-core` dependency and cargo
 # cannot be asked where core is, the way a driver crate asks. So core is a
 # plain pinned sibling checkout here, and this script is the whole of the
 # coupling — a path, resolved at run time, and nothing linked or vendored.
