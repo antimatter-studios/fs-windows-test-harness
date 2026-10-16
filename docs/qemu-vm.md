@@ -28,6 +28,26 @@ with Homebrew's `python3` (put `$(brew --prefix)/bin` first on `PATH`). No
 host root access is needed after dependencies and KVM permissions are
 configured; HVF needs none.
 
+On Linux, `up` checks QEMU's inherited memory policy in a separate launcher.
+If it is interleaved, the launcher requests the kernel's local allocation
+policy before executing QEMU. The kernel chooses the node and permits fallback;
+no Pi model or NUMA node number is selected. Default, bind and preferred
+policies are preserved. The parent process and other workloads are unchanged.
+The ARM64 helper uses the Linux kernel ABI through libc, with no new dependency.
+macOS launches QEMU directly with its native allocation policy.
+Linux kernels without the NUMA policy API also retain native allocation.
+
+The decision and verified result are logged in `qemu.log`. A denied policy
+query or change fails startup explicitly. Some kernels enforce a boot-time
+policy and return success while ignoring changes: the launcher reports that
+allocation is unchanged and lets QEMU attempt startup. This is observed with
+this Pi's `numa_policy=interleave` configuration and confirmed by the
+[kernel implementation](https://github.com/raspberrypi/linux/blob/rpi-6.18.y/mm/mempolicy.c#L1675).
+The earlier manual node preference was also ignored on this host, so it must
+not be credited with fixing startup. The script does not compact memory,
+modify host boot settings, or retry a failed QEMU launch; exhausted or
+fragmented memory can still fail startup.
+
 `prepare` finds the firmware itself: Debian's `qemu-efi-aarch64`
 (`/usr/share/AAVMF/AAVMF_CODE.fd` + `AAVMF_VARS.fd`) first, then QEMU's own
 build beside the `qemu-system-aarch64` on `PATH`
@@ -146,6 +166,60 @@ wrapper are not covered by its local lock.
 The existing `--no-ship` flag can reuse a known unchanged deployment. Do not
 use it after changing source, scripts, build settings or tools; this branch
 does not implement automatic deployment fingerprinting.
+
+## Optional: share images instead of copying them
+
+> **Experimental: known read failure.** On macOS with the virtiofsd port
+> and virtio-win 0.1.302, Windows intermittently fails to read a file from
+> the share (`Error performing inpage operation`): 3 of 72 NTFS scenarios in
+> each of two runs, while virtiofsd answered every request successfully.
+> Shipping was about 81% faster, but a test harness cannot accept spurious
+> failures; keep scp for real runs until this is understood
+> ([measurements](validation/qemu-virtiofs-macos-2026-10-10/README.md)).
+
+By default every image crosses into and out of the guest over scp. A host
+directory can instead be shared with the guest through virtio-fs, so ship
+steps copy inside Windows (see [the vocabulary](vocabulary.md)). It is off
+unless you ask for it, and a guest started without it behaves as before.
+
+It needs a `virtiofsd` on the host: Debian's `virtiofsd` package, or on macOS
+a build of the macOS port (`christhomas/virtiofsd`, branch `cth/macos`):
+
+```sh
+cargo build --release --locked      # in the virtiofsd checkout
+```
+
+Start the guest with the share, and install the guest side once:
+
+```sh
+python3 scripts/local-vm.py up --share /path/to/images \
+    --virtiofsd /path/to/virtiofsd/target/release/virtiofsd
+python3 scripts/local-vm.py wait
+python3 scripts/local-vm.py share-driver     # once per guest
+python3 scripts/local-vm.py down --save     # retain the installed guest driver
+python3 scripts/local-vm.py up --share /path/to/images \
+    --virtiofsd /path/to/virtiofsd/target/release/virtiofsd
+python3 scripts/local-vm.py wait
+```
+
+Save the driver installation before the next ordinary shutdown: provisioned
+guests discard each boot's changes. Later boots reuse the saved driver.
+
+`share-driver` installs virtio-win's ARM64 `viofs` driver from the pinned
+VirtIO ISO and its WinFsp-based service, which mounts the share at `Z:` on
+every boot. `up --share` starts `virtiofsd` (`--cache never`, so neither side
+reads a stale copy) and gives QEMU shared guest memory and the virtio-fs
+device; `down` leaves no `virtiofsd` behind. A running guest is reused only
+with the same share: `down` first to add, change or remove it. Without a
+share the service finds no device and stays idle.
+
+Then point the consumer's ignored `.test-env` at the share:
+
+```sh
+HOST_IMAGE_DIR=/path/to/images
+VM_SHARE_HOST_DIR=/path/to/images
+VM_SHARE_GUEST_DIR=Z:/
+```
 
 ## Inspect and stop
 
