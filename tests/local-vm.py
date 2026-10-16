@@ -15,16 +15,90 @@ import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 spec = importlib.util.spec_from_file_location(
     "local_vm", Path(__file__).resolve().parents[1] / "scripts/local-vm.py"
 )
 vm = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(vm)
+memory_spec = importlib.util.spec_from_file_location(
+    "linux_memory", vm.RESOURCES / "linux-memory.py"
+)
+memory = importlib.util.module_from_spec(memory_spec)
+memory_spec.loader.exec_module(memory)
 
 
 class LocalVM(unittest.TestCase):
+    def test_interleaved_policy_becomes_local_without_a_node_number(self):
+        lib = MagicMock()
+        lib.set_mempolicy.return_value = 0
+        with patch.object(memory, "read_policy", side_effect=[3, 4]):
+            self.assertIn("changed to local", memory.normalize_policy(lib))
+        lib.set_mempolicy.assert_called_once_with(4, None, 0)
+
+    def test_default_bind_and_preferred_policies_are_preserved(self):
+        for mode in (0, 1, 2, 4, 5):
+            lib = MagicMock()
+            with patch.object(memory, "read_policy", return_value=mode):
+                self.assertIn("retained", memory.normalize_policy(lib))
+            lib.set_mempolicy.assert_not_called()
+
+    def test_interleave_nodemask_flags_are_not_node_preferences(self):
+        lib = MagicMock()
+        lib.set_mempolicy.return_value = 0
+        with patch.object(memory, "read_policy", side_effect=[3 | (1 << 14), 4]):
+            memory.normalize_policy(lib)
+        lib.set_mempolicy.assert_called_once_with(4, None, 0)
+
+    def test_failed_policy_change_is_not_ignored(self):
+        lib = MagicMock()
+        lib.set_mempolicy.return_value = -1
+        with (
+            patch.object(memory, "read_policy", return_value=3),
+            self.assertRaisesRegex(RuntimeError, "set_mempolicy failed"),
+        ):
+            memory.normalize_policy(lib)
+
+    def test_kernel_ignored_change_is_reported_without_claiming_a_fix(self):
+        lib = MagicMock()
+        lib.set_mempolicy.return_value = 0
+        with patch.object(memory, "read_policy", side_effect=[3, 3]):
+            self.assertIn("unchanged policy", memory.normalize_policy(lib))
+        lib.set_mempolicy.assert_called_once_with(4, None, 0)
+
+    def test_failed_policy_query_is_refused(self):
+        lib = MagicMock()
+        lib.get_mempolicy.return_value = -1
+        with self.assertRaisesRegex(RuntimeError, "get_mempolicy failed"):
+            memory.read_policy(lib)
+
+    def test_linux_without_numa_uses_native_allocation(self):
+        lib = MagicMock()
+        lib.get_mempolicy.return_value = -1
+        with patch.object(memory.ctypes, "get_errno", return_value=memory.errno.ENOSYS):
+            self.assertIn("native allocation retained", memory.normalize_policy(lib))
+        lib.set_mempolicy.assert_not_called()
+
+    def test_unsupported_kernel_abi_is_named(self):
+        with (
+            patch.object(memory.platform, "machine", return_value="unsupported"),
+            self.assertRaisesRegex(RuntimeError, "supported ARM64 host"),
+        ):
+            memory.main(["qemu"])
+
+    def test_linux_launch_uses_memory_policy_wrapper(self):
+        with patch.object(vm.platform, "system", return_value="Linux"):
+            command = vm.qemu_launch_command(["/usr/bin/qemu", "-daemonize"])
+        self.assertEqual(command[-2:], ["/usr/bin/qemu", "-daemonize"])
+        self.assertEqual(Path(command[1]).name, "linux-memory.py")
+
+    def test_macos_launch_does_not_use_linux_memory_policy(self):
+        with patch.object(vm.platform, "system", return_value="Darwin"):
+            self.assertEqual(
+                vm.qemu_launch_command(["qemu", "-daemonize"]), ["qemu", "-daemonize"]
+            )
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="fswth-test-")
         self.addCleanup(self.temp.cleanup)
@@ -748,6 +822,175 @@ class LocalVM(unittest.TestCase):
             else:
                 popen.assert_not_called()
 
+    def test_a_share_adds_shared_guest_memory_and_a_virtio_fs_device(self):
+        with patch.object(vm, "runtime_dir", return_value=self.state):
+            plain = vm.qemu_command(self.state, self.config)
+            shared = vm.qemu_command(self.state, self.config, share=True)
+        self.assertNotIn("vhost-user-fs-pci", " ".join(plain))
+        self.assertNotIn("memory-backend", " ".join(plain))
+        machine = shared[shared.index("-machine") + 1]
+        self.assertTrue(machine.endswith(",memory-backend=mem"), machine)
+        # vhost-user maps guest RAM into virtiofsd; macOS has no memfd, so
+        # POSIX shared memory serves both hosts.
+        self.assertIn("memory-backend-shm,id=mem,size=4096M,share=on", shared)
+        self.assertIn(f"socket,id=vfs,path={self.state / 'vfs.sock'}", shared)
+        self.assertIn("vhost-user-fs-pci,queue-size=1024,chardev=vfs,tag=fswth", shared)
+
+    def test_up_with_a_share_starts_virtiofsd_before_qemu(self):
+        share = self.state / "images"
+        share.mkdir()
+        self.config["install_started"] = True
+        order = []
+
+        def daemon(argv, **kwargs):
+            order.append("virtiofsd")
+            (self.state / "vfs.sock").touch()
+            return MagicMock(pid=4242, poll=MagicMock(return_value=None))
+
+        with (
+            patch.object(vm, "running", return_value=None),
+            patch.object(vm, "runtime_dir", return_value=self.state),
+            patch.object(vm.subprocess, "Popen", side_effect=daemon) as popen,
+            patch.object(
+                vm, "run", side_effect=lambda *a, **k: order.append("qemu")
+            ) as run,
+        ):
+            vm.up(self.state, self.config, share=share, virtiofsd="/opt/virtiofsd")
+            self.assertEqual(vm.current_share(self.state), str(share))
+        self.assertEqual(order, ["virtiofsd", "qemu"])
+        self.assertEqual(
+            [str(x) for x in popen.call_args.args[0]],
+            [
+                "/opt/virtiofsd",
+                "--shared-dir",
+                str(share),
+                "--socket-path",
+                str(self.state / "vfs.sock"),
+                "--sandbox",
+                "none",
+                "--cache",
+                "never",
+            ],
+        )
+        self.assertIn(
+            "vhost-user-fs-pci,queue-size=1024,chardev=vfs,tag=fswth",
+            run.call_args.args[0],
+        )
+
+    def test_a_running_vm_is_reused_only_with_the_same_share(self):
+        share = self.state / "images"
+        share.mkdir()
+        with (
+            patch.object(vm, "running", return_value={"running": True}),
+            patch.object(vm, "runtime_dir", return_value=self.state),
+            patch.object(vm, "run") as run,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "down first"):
+                vm.up(self.state, self.config, share=share)
+            vm.write_json(self.state / "share.json", {"dir": str(share)})
+            vm.up(self.state, self.config, share=share)
+            with self.assertRaisesRegex(RuntimeError, "down first"):
+                vm.up(self.state, self.config)
+        run.assert_not_called()
+
+    def test_a_share_without_virtiofsd_or_a_directory_is_refused(self):
+        self.config["install_started"] = True
+        with (
+            patch.object(vm, "running", return_value=None),
+            patch.object(vm, "runtime_dir", return_value=self.state),
+            patch.object(vm.shutil, "which", return_value=None),
+            patch.object(vm, "VIRTIOFSD_PATHS", ()),
+            patch.object(vm, "run") as run,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Missing virtiofsd"):
+                vm.up(self.state, self.config, share=self.state)
+            with self.assertRaisesRegex(RuntimeError, "not a directory"):
+                vm.up(
+                    self.state, self.config, share=self.state / "absent", virtiofsd="/v"
+                )
+        run.assert_not_called()
+
+    def test_virtiofsd_is_stopped_when_it_or_qemu_fails_to_start(self):
+        self.config["install_started"] = True
+        daemon = MagicMock(pid=4242, poll=MagicMock(return_value=1))
+        with (
+            patch.object(vm, "running", return_value=None),
+            patch.object(vm, "runtime_dir", return_value=self.state),
+            patch.object(vm.subprocess, "Popen", return_value=daemon),
+            patch.object(vm, "run") as run,
+            self.assertRaisesRegex(RuntimeError, "virtiofsd.log"),
+        ):
+            vm.up(self.state, self.config, share=self.state, virtiofsd="/v")
+        run.assert_not_called()
+        daemon.terminate.assert_called_once()
+
+        def listening(argv, **kwargs):
+            (self.state / "vfs.sock").touch()
+            return daemon
+
+        daemon = MagicMock(pid=4242, poll=MagicMock(return_value=None))
+        with (
+            patch.object(vm, "running", return_value=None),
+            patch.object(vm, "runtime_dir", return_value=self.state),
+            patch.object(vm.subprocess, "Popen", side_effect=listening),
+            patch.object(
+                vm, "run", side_effect=subprocess.CalledProcessError(1, "qemu")
+            ),
+            self.assertRaisesRegex(RuntimeError, "QEMU launch failed"),
+        ):
+            vm.up(self.state, self.config, share=self.state, virtiofsd="/v")
+        daemon.terminate.assert_called_once()
+        self.assertIsNone(vm.current_share(self.state))
+
+    def test_down_stops_only_its_own_virtiofsd(self):
+        (self.state / "virtiofsd.pid").write_text("4242")
+        vm.write_json(self.state / "share.json", {"dir": "/srv/images"})
+        for name, killed in (("virtiofsd", True), ("bash", False)):
+            with (
+                self.subTest(name=name),
+                patch.object(vm, "runtime_dir", return_value=self.state),
+                patch.object(vm, "process_name", return_value=name),
+                patch.object(vm.os, "kill") as kill,
+            ):
+                vm.stop_virtiofsd(self.state)
+            if killed:
+                kill.assert_called_once_with(4242, vm.signal.SIGTERM)
+            else:
+                kill.assert_not_called()
+        self.assertIsNone(vm.current_share(self.state))
+        self.assertFalse((self.state / "virtiofsd.pid").exists())
+
+    def test_share_driver_copies_virtio_fs_from_the_pinned_iso(self):
+        self.config["provisioned"] = True
+        calls = []
+
+        def run(argv, **kwargs):
+            calls.append([str(x) for x in argv])
+            if "-x" in argv:
+                arm64 = Path(argv[argv.index("-C") + 1]) / "viofs/w11/ARM64"
+                arm64.mkdir(parents=True)
+                for name in ("viofs.inf", "viofs.sys", "virtiofs.exe"):
+                    (arm64 / name).write_bytes(name.encode())
+
+        with (
+            patch.object(vm, "run", side_effect=run),
+            patch.object(vm, "ssh") as ssh,
+        ):
+            vm.share_driver(self.state, self.config)
+        extract, copy = calls
+        self.assertEqual(extract[-1], "viofs/w11/ARM64")
+        self.assertEqual(copy[-1], "fswth-local:C:/fswth-bootstrap/viofs/")
+        self.assertEqual(
+            sorted(Path(x).name for x in copy[1:-1]),
+            ["share-driver.ps1", "viofs.inf", "viofs.sys", "virtiofs.exe"],
+        )
+        self.assertIn("share-driver.ps1", ssh.call_args.args[1])
+        with (
+            patch.object(vm, "run"),
+            self.assertRaisesRegex(RuntimeError, "virtio-fs driver was not extracted"),
+        ):
+            vm.share_driver(self.state, self.config)
+
     def test_old_python_is_refused_by_name(self):
         with (
             patch.object(vm.sys, "version_info", (3, 9, 6)),
@@ -892,6 +1135,65 @@ class LocalVM(unittest.TestCase):
                 vm.main(["--state", str(self.state), "exec", "--", *command])
         with self.assertRaisesRegex(RuntimeError, "State path"):
             vm.main(["--state", "/tmp/bad,dir", "status"])
+
+    def test_a_shared_cold_boot_uses_the_reset_overlay(self):
+        self.config.update(install_started=True, provisioned=True)
+        (self.state / vm.BASE_VARS).write_bytes(b"reset variables")
+        share = self.state / "images"
+        share.mkdir()
+        order = []
+
+        def daemon(*args, **kwargs):
+            order.append("virtiofsd")
+            (self.state / "vfs.sock").touch()
+            return MagicMock(pid=4242, poll=MagicMock(return_value=None))
+
+        def run(command, **kwargs):
+            order.append("reset" if command[0] == "qemu-img" else "qemu")
+
+        with (
+            patch.object(vm, "running", return_value=None),
+            patch.object(vm, "runtime_dir", return_value=self.state),
+            patch.object(vm.subprocess, "Popen", side_effect=daemon),
+            patch.object(vm, "run", side_effect=run) as launch,
+        ):
+            vm.up(self.state, self.config, share=share, virtiofsd="/virtiofsd")
+            self.assertEqual(vm.current_share(self.state), str(share))
+        self.assertEqual(order, ["reset", "virtiofsd", "qemu"])
+        command = launch.call_args.args[0]
+        self.assertIn(
+            f"if=none,id=system,format=qcow2,discard=unmap,file={self.state / vm.RUN_DISK}",
+            command,
+        )
+        self.assertIn(f"if=pflash,format=raw,file={self.state / vm.RUN_VARS}", command)
+        self.assertEqual((self.state / vm.RUN_VARS).read_bytes(), b"reset variables")
+
+    def test_saving_a_shared_boot_stops_its_daemon_before_saving(self):
+        self.config["disk"] = "overlay"
+        for name in (vm.RUN_DISK, vm.RUN_VARS):
+            (self.state / name).write_bytes(b"this boot")
+        (self.state / "virtiofsd.pid").write_text("4242")
+        vm.write_json(self.state / "share.json", {"dir": "/images"})
+        order = []
+
+        def save(state, config):
+            order.append("save")
+            self.assertFalse((state / "virtiofsd.pid").exists())
+            self.assertIsNone(vm.current_share(state))
+            self.assertEqual((state / vm.RUN_DISK).read_bytes(), b"this boot")
+
+        with (
+            patch.object(vm, "running", side_effect=[{"running": True}, None]),
+            patch.object(vm, "runtime_dir", return_value=self.state),
+            patch.object(vm, "ssh"),
+            patch.object(vm, "process_name", return_value="virtiofsd"),
+            patch.object(vm.os, "kill", side_effect=lambda *args: order.append("stop")),
+            patch.object(vm, "save", side_effect=save),
+        ):
+            vm.down(self.state, 30, self.config, keep=True)
+        self.assertEqual(order, ["stop", "save"])
+        self.assertFalse((self.state / vm.RUN_DISK).exists())
+        self.assertFalse((self.state / vm.RUN_VARS).exists())
 
 
 if __name__ == "__main__":
