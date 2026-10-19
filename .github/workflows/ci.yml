@@ -13,10 +13,14 @@ on:
     branches: [main]
 
 # A new push to a PR supersedes the run in progress. Runs on main are
-# never cancelled, so every commit on main keeps a complete verdict.
+# never cancelled, so every commit on main keeps a complete verdict. Nor is
+# the run of a PR titled "red:" (agent-core v8): it holds only its failing
+# test and its run is the red evidence, so each push to it is a group of its
+# own commit, and the push that adds the fix cannot cancel it.
+# tests/ci-concurrency.sh holds this.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ startsWith(github.event.pull_request.title, 'red:') && format('-red-{0}', github.event.pull_request.head.sha) || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && !startsWith(github.event.pull_request.title, 'red:') }}
 
 permissions:
   contents: read
