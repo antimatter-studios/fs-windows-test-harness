@@ -240,7 +240,7 @@ jobs:
         run: bash scripts/task.sh ci-concurrency ci-concurrency 20 1000 -- bash tests/ci-concurrency.sh
 
       - name: local QEMU lifecycle checks (no guest needed)
-        run: bash scripts/task.sh local-vm local-vm 100 9000 -- python3 -B tests/local-vm.py
+        run: bash scripts/task.sh local-vm local-vm 130 13000 -- python3 -B tests/local-vm.py
 
       - name: upload state-machine logs
         if: always()
