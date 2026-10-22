@@ -13,10 +13,14 @@ on:
     branches: [main]
 
 # A new push to a PR supersedes the run in progress. Runs on main are
-# never cancelled, so every commit on main keeps a complete verdict.
+# never cancelled, so every commit on main keeps a complete verdict. Nor is
+# the run of a PR titled "red:" (agent-core v8): it holds only its failing
+# test and its run is the red evidence, so each push to it is a group of its
+# own commit, and the push that adds the fix cannot cancel it.
+# tests/ci-concurrency.sh holds this.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ startsWith(github.event.pull_request.title, 'red:') && format('-red-{0}', github.event.pull_request.head.sha) || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && !startsWith(github.event.pull_request.title, 'red:') }}
 
 permissions:
   contents: read
@@ -232,6 +236,8 @@ jobs:
         run: bash scripts/task.sh agents-core agents-core 20 1000 -- bash tests/agents-core.sh
       - name: changelog self-test (fragments pass; an entry in CHANGELOG.md is refused)
         run: bash scripts/task.sh changelog changelog 20 1000 -- bash tests/changelog-fragments.sh
+      - name: concurrency self-test (a red pull request's run is never cancelled)
+        run: bash scripts/task.sh ci-concurrency ci-concurrency 20 1000 -- bash tests/ci-concurrency.sh
 
       - name: local QEMU lifecycle checks (no guest needed)
         run: bash scripts/task.sh local-vm local-vm 100 9000 -- python3 -B tests/local-vm.py
