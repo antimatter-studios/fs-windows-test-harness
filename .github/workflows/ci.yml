@@ -447,13 +447,26 @@ jobs:
             tests/smoke-consumer/test-diagnostics/
           if-no-files-found: warn
 
+  # The bash macOS ships is 3.2, and developers run the matrix from it against
+  # the local Windows VM. The stand-in ssh runs the whole locked path without a
+  # VM, so anything in it that needs a newer bash fails here.
+  macos-bash:
+    name: run-tests.sh under the bash macOS ships
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: /bin/bash tests/remote-timeout.sh
+
   ci-ok:
     # THE required check for branch protection / auto-merge. Fails if any
     # job failed, was cancelled or was skipped, and if a job exists that
     # this one does not wait for.
     name: ci-ok
     if: always()
-    needs: [changes, lint, runner-unit, state-machine, config, smoke]
+    needs: [changes, lint, runner-unit, state-machine, config, smoke, macos-bash]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

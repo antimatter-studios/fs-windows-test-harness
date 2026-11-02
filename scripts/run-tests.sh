@@ -564,6 +564,13 @@ PYEOF
         local run_rc=$? release_rc=0
         trap - EXIT USR1
         set +e
+        # bash 3.2 (the one macOS ships) gives an EXIT trap $?=0 when `set -u`
+        # kills the script, so a run that died reads as a pass unless it says
+        # it reached its end.
+        if [[ "${run_rc}" -eq 0 && "${RUN_REACHED_END:-0}" != "1" ]]; then
+            echo "[run-tests] the run stopped before it reached its end" >&2
+            run_rc=1
+        fi
         if [[ -n "${VM_LOCK_HEARTBEAT_PID:-}" ]]; then
             kill "${VM_LOCK_HEARTBEAT_PID}" 2>/dev/null || true
             wait "${VM_LOCK_HEARTBEAT_PID}" 2>/dev/null || true
@@ -596,8 +603,10 @@ PYEOF
     : > "${VM_LOCK_HEARTBEAT_LOG}"
     trap 'echo "[run-tests] VM lease renewal failed; see ${VM_LOCK_HEARTBEAT_LOG}" >&2; exit 74' USR1
     # Use the orchestrator PID only for signalling this local process. It is
-    # never consulted by the VM when deciding whether to reclaim a lease.
-    VM_LOCK_PARENT_PID="${BASHPID}"
+    # never consulted by the VM when deciding whether to reclaim a lease. This
+    # runs in the script's own shell, so $$ is that process (BASHPID needs
+    # bash 4, and macOS ships 3.2).
+    VM_LOCK_PARENT_PID="$$"
     (
         while sleep "${VM_LOCK_HEARTBEAT_SECONDS}"; do
             if ! vm_lock_remote Renew >/dev/null; then
@@ -817,4 +826,5 @@ echo "==============================================================="
 echo "diagnostics: ${consumer_root}/test-diagnostics/matrix/"
 echo "test exit:   ${RUN_EXIT}  (0 = all passed/ignored; non-zero = at least one failed)"
 echo "==============================================================="
+RUN_REACHED_END=1
 exit ${RUN_EXIT}
