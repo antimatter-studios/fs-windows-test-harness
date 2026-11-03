@@ -292,6 +292,7 @@ chore lint            # bash -n, shellcheck, cargo fmt --check, clippy -D warnin
 chore test            # runner unit tests
 chore state-machine   # claim / update-status / reset, incl. concurrent writers
 chore remote-timeout  # a VM command that never returns fails, named and bounded
+chore vm-decision     # the VM phases run exactly when the runner will run a VM scenario
 chore output-budget   # the wrapper resolves from core; every task is budgeted
 chore agents-core     # AGENTS.md carries the shared block; drift is refused
 chore config          # schemas, examples, negative fixtures (python3 3.11+, jsonschema)
@@ -307,7 +308,7 @@ CI (`.github/workflows/ci.yml`), every job running the same task as above:
 |---|---|
 | `lint (shell + cargo)` | `chore lint` |
 | `runner unit tests` | `chore test` |
-| `state-machine integration test` | `chore state-machine`, `chore remote-timeout`, `chore output-budget`, `chore agents-core` |
+| `state-machine integration test` | `chore state-machine`, `chore remote-timeout`, `chore vm-decision`, `chore output-budget`, `chore agents-core` |
 | `config (schemas, examples, negative fixtures)` | `chore config` |
 | `smoke (windows-latest, …)` | `tests/chkdsk-verdict.ps1`, `tests/vm-lock.ps1`, the VM-workdir lock contention check, `chore smoke` |
 | `ci-ok` | the single required check: every job above ran and succeeded, and none is missing from its `needs` |

@@ -44,7 +44,7 @@ and [erofs-win-driver](https://github.com/antimatter-studios/erofs-win-driver).
 | `schemas/` | JSON Schema for `fs-windows-test-harness.toml` (`harness.schema.json`) and `test-matrix.json`. |
 | `docs/` | Long-form: the QEMU guest, the VMware alternative, consumer integration, architecture, triage, multi-agent protocol, and the validation reports under `docs/validation/`. |
 | `examples/minimal/` | Smallest viable consumer config. |
-| `tests/` | Self-tests: the state-machine test, config validation with negative fixtures (`config-fixtures/`), the QEMU lifecycle checks (`local-vm.py`, no guest needed), the remote-timeout, output-budget and agent-guide checks, the Windows-side PowerShell tests, and `smoke-consumer/`, an end-to-end consumer that mounts volumes through WinFsp's memfs. |
+| `tests/` | Self-tests: the state-machine test, config validation with negative fixtures (`config-fixtures/`), the QEMU lifecycle checks (`local-vm.py`, no guest needed), the remote-timeout, VM-decision, output-budget and agent-guide checks, the Windows-side PowerShell tests, and `smoke-consumer/`, an end-to-end consumer that mounts volumes through WinFsp's memfs. |
 | `.github/workflows/` | CI: lint, runner unit tests, state-machine, config validation, the Windows smoke test, and the aggregate `ci-ok` check, on pull requests, in the merge queue and on `main`. See [CI and automated merging](#ci-and-automated-merging). |
 
 ## The Windows guest
@@ -137,10 +137,11 @@ the same commands.
 
 ```sh
 chore siblings # first: put ../rust-fs-core where the output budget is read from
-chore check    # lint + test + state-machine + remote-timeout + output-budget + agents-core + config + local-vm: everything off Windows
+chore check    # lint + test + state-machine + remote-timeout + vm-decision + output-budget + agents-core + config + local-vm: everything off Windows
 chore lint     # bash -n, shellcheck, cargo fmt --check, cargo clippy
 chore test     # runner unit tests
 chore state-machine
+chore vm-decision    # the preflight, lock and ship run exactly when the runner will run a VM scenario
 chore output-budget  # the wrapper resolves from core, and every task is budgeted
 chore agents-core    # AGENTS.md carries the shared agent-core block, unmodified
 chore config   # needs python3 3.11+ and `pip install 'jsonschema>=4.19'`
@@ -250,7 +251,7 @@ at it. Each job proves one thing:
 | `changes (does this need the full pipeline?)` | Whether the change touches anything but documentation. Only a documentation-only change may skip the Windows smoke test. |
 | `lint (shell + cargo)` | Every shell script parses and passes shellcheck (errors); the runner is `rustfmt`-clean and `clippy -D warnings`-clean. |
 | `runner unit tests` | The runner's substitution, dispatch, config loading, `.test-env` parsing and disk hygiene behave, and its loader accepts every consumer config in the repo and rejects every fixture in `tests/config-fixtures/invalid/`. |
-| `state-machine integration test` | `claim` / `update-status` / `reset` transition statuses correctly, and concurrent claimers and writers neither double-claim nor lose updates. The remote-timeout, output-budget and agent-guide self-tests and the QEMU lifecycle checks run here too. |
+| `state-machine integration test` | `claim` / `update-status` / `reset` transition statuses correctly, and concurrent claimers and writers neither double-claim nor lose updates. The remote-timeout, VM-decision, output-budget and agent-guide self-tests and the QEMU lifecycle checks run here too. |
 | `config (schemas, examples, negative fixtures)` | Both schemas are valid; every consumer config (`examples/*`, `tests/smoke-consumer`) validates and only uses declared ops; every negative fixture is rejected for the reason its `expect.txt` names. |
 | `smoke (windows-latest, WinFsp memfs, run-tests.sh over SSH)` | The harness works end to end on real Windows, and the chkdsk verdict, VM run-lock and guest execution-policy tests pass there. See below. |
 | `ci-ok` | Every job above succeeded (not failed, cancelled, or skipped other than the smoke test on a documentation-only change), and no job exists that `ci-ok` does not wait for. |
