@@ -417,13 +417,51 @@ def load_config(state):
     return config
 
 
+def instance(state, args):
+    base = args.base.expanduser().resolve()
+    if any(char in str(base) for char in ',"%\n\r'):
+        raise RuntimeError(
+            "Base state path cannot contain commas, double quotes, %, or newlines"
+        )
+    if state == base or (state / "vm.json").exists():
+        raise RuntimeError("State already prepared; choose a new --state for the instance")
+    if any(entry.name != "operation.lock" for entry in state.iterdir()):
+        raise RuntimeError("Shared-base instance needs an empty state directory")
+    config = load_config(base)
+    if not config.get("provisioned") or not config.get("install_started"):
+        raise RuntimeError("Shared-base instance needs a provisioned base")
+    if config.get("base_state"):
+        raise RuntimeError("Shared-base instance must reference the original base state")
+    if not 1 <= args.ssh_port <= 65535 or args.ssh_port == config["ssh_port"]:
+        raise RuntimeError(
+            "Instance SSH port must be 1..65535 and differ from the base port"
+        )
+    for name in (BASE_DISK, BASE_VARS, "uefi-code.fd", "ssh-key"):
+        if not (base / name).is_file():
+            raise RuntimeError(f"Shared-base file is missing: {base / name}")
+    config.update(base_state=str(base), ssh_port=args.ssh_port, disk="overlay")
+    shutil.copyfile(base / "ssh-key", state / "ssh-key")
+    (state / "ssh-key").chmod(0o600)
+    transport(state, args.ssh_port)
+    write_json(state / "vm.json", config)
+    print(f"Prepared instance {state}; read-only base {base}; next: up")
+
+
+def writable_base(config):
+    if config.get("base_state"):
+        raise RuntimeError(
+            "Shared-base instances cannot install, provision, or save the base"
+        )
+
+
 def qemu_command(state, config, install=False, share=False):
     runtime = runtime_dir(state)
+    base = Path(config.get("base_state", state))
     # State prepared before HVF support has no accelerator: it was KVM.
     accel = config.get("accelerator", "kvm")
     disk, variables = (
         (RUN_DISK, RUN_VARS)
-        if config.get("disk") == "overlay"
+        if config.get("disk") == "overlay" or config.get("base_state")
         else (BASE_DISK, BASE_VARS)
     )
     command = [
@@ -439,7 +477,7 @@ def qemu_command(state, config, install=False, share=False):
         "-m",
         str(config["memory_mib"]),
         "-drive",
-        f"if=pflash,format=raw,readonly=on,file={state / 'uefi-code.fd'}",
+        f"if=pflash,format=raw,readonly=on,file={base / 'uefi-code.fd'}",
         "-drive",
         f"if=pflash,format=raw,file={state / variables}",
         "-device",
@@ -466,7 +504,8 @@ def qemu_command(state, config, install=False, share=False):
         # discard=unmap passes Windows' TRIM to the qcow2, so freed clusters
         # read as zeros and are dropped when down --save flattens the disk.
         "-drive",
-        f"if=none,id=system,format=qcow2,discard=unmap,file={state / disk}",
+        f"if=none,id=system,format=qcow2,discard=unmap,file={state / disk}"
+        + (",backing.read-only=on" if config.get("base_state") else ""),
         "-device",
         "nvme,drive=system,serial=FSWTHBOOT,bootindex=1",
         "-netdev",
@@ -507,6 +546,8 @@ def discard(state):
 
 
 def reset(state):
+    config = load_config(state) if (state / "vm.json").is_file() else {}
+    base = Path(config.get("base_state", state))
     # Recreating the overlay replaces the last boot's. A relative backing
     # name keeps the state directory movable.
     run(
@@ -519,16 +560,17 @@ def reset(state):
             "-F",
             "qcow2",
             "-b",
-            BASE_DISK,
+            base / BASE_DISK if config.get("base_state") else BASE_DISK,
             state / RUN_DISK,
         ],
         timeout=30,
     )
-    shutil.copyfile(state / BASE_VARS, state / RUN_VARS)
+    shutil.copyfile(base / BASE_VARS, state / RUN_VARS)
 
 
 def save(state, config):
     """Make the stopped guest's disk the new reset point, flattened."""
+    writable_base(config)
     overlay = config.get("disk") == "overlay"
     new = state / (BASE_DISK + ".new")
     new.unlink(missing_ok=True)
@@ -646,6 +688,8 @@ def qemu_launch_command(command):
 
 
 def up(state, config, install=False, share=None, virtiofsd=None):
+    if config.get("base_state") and (install or not config.get("provisioned")):
+        writable_base(config)
     if share is not None:
         share = Path(share).expanduser().resolve()
         if not share.is_dir():
@@ -751,6 +795,7 @@ def wait_ready(state, timeout):
 
 
 def provision(state, config):
+    writable_base(config)
     wait_ready(state, 300)
     with (state / "provision.log").open("a") as log:
         run(
@@ -781,6 +826,8 @@ def provision(state, config):
 
 
 def down(state, timeout, config=None, keep=False):
+    if keep:
+        writable_base(config if config is not None else load_config(state))
     if running(state) is None:
         if keep:
             raise RuntimeError(
@@ -887,6 +934,7 @@ def share_driver(state, config):
 
 def boot_installer(state, config):
     """Recover the initial UEFI Shell prompt after missing 'press any key'."""
+    writable_base(config)
     if not config["install_started"] or config["provisioned"]:
         raise RuntimeError(
             "boot-installer is only for the first installation's UEFI Shell"
@@ -958,6 +1006,15 @@ def parse_args(argv=None):
     prep.add_argument("--disk-gib", type=positive, default=128)
     prep.add_argument("--firmware-code", help="default: discovered (docs/qemu-vm.md)")
     prep.add_argument("--firmware-vars", help="variable-store template for the code")
+    child = sub.add_parser(
+        "instance", help="reuse a provisioned base without copying its disk"
+    )
+    child.add_argument(
+        "--base", type=Path, required=True, help="original provisioned --state directory"
+    )
+    child.add_argument(
+        "--ssh-port", type=int, required=True, help="unique loopback SSH port"
+    )
     start = sub.add_parser("up", help="start once; reuse a running VM")
     start.add_argument(
         "--share",
@@ -1039,6 +1096,9 @@ def main(argv=None):
     with exclusive(state), keep_awake(args.action):
         if args.action == "prepare":
             prepare(state, args)
+            return 0
+        if args.action == "instance":
+            instance(state, args)
             return 0
         config = load_config(state)
         if args.action == "up":
