@@ -222,6 +222,12 @@ jobs:
       - name: a remote command that never returns fails, named and bounded
         run: bash scripts/task.sh remote-timeout remote-timeout 25 1500 -- bash tests/remote-timeout.sh
 
+      # The preflight, the lock and the ship phase run exactly when the runner
+      # will run a VM scenario, whichever way the filter selected it. Stand-in
+      # ssh, no VM, so it rides in this job too.
+      - name: a run gets the VM phases exactly when its scenarios use the VM
+        run: bash scripts/task.sh vm-decision vm-decision 25 2000 -- bash tests/vm-decision.sh
+
       # That the wrapper resolves from rust-fs-core, that both refusals are
       # loud, and that every chore task runs under a budget. A script
       # self-test like the one above, so it lives in this job rather than

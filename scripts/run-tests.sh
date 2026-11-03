@@ -22,6 +22,9 @@
 #       run-tests.sh basic-ro-list     # one explicit scenario
 #       run-tests.sh basic-rw          # all basic-rw-* scenarios
 #       run-tests.sh xattr             # all xattr-* scenarios
+#     A filter matching no scenario name is looked up as a `[groups]` key
+#     in harness.toml and selects that group's scenarios:
+#       run-tests.sh smoke             # every scenario in [groups].smoke
 #
 #   bash <harness>/scripts/run-tests.sh [SCENARIO] --build
 #     Rebuild the consumer binary on the host first. Requires
@@ -219,11 +222,18 @@ except ImportError:
 m = json.load(open(sys.argv[1]))
 pat = sys.argv[2]
 with open(sys.argv[3], 'rb') as f:
-    ops = tomllib.load(f).get('ops', {})
+    cfg = tomllib.load(f)
+ops = cfg.get('ops', {})
+scenarios = {n: s for n, s in m.get("scenarios", {}).items() if isinstance(s, dict)}
+# The same selection as the runner (runner/src/bin/run-matrix.rs): any scenario
+# name matching the filter selects by name, recipe or not, and only a filter
+# matching no name is looked up in [groups].
+selected = [n for n in scenarios if not pat or pat in n]
+if pat and not selected:
+    selected = [n for n in cfg.get('groups', {}).get(pat, []) if n in scenarios]
 needs_vm = False
-for name, s in m.get("scenarios", {}).items():
-    if not isinstance(s, dict): continue
-    if pat and pat not in name: continue
+for name in selected:
+    s = scenarios[name]
     for step in s.get("recipe", []):
         if not isinstance(step, dict): continue
         op = step.get("op") or step.get("type") or ""

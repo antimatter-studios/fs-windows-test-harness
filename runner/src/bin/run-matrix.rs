@@ -181,6 +181,10 @@ fn main() {
     //      `harness.toml [groups]` for a matching group key and expand
     //      to that group's explicit scenario list. Emits a diagnostic
     //      so the caller can see which path was taken.
+    //
+    // scripts/run-tests.sh repeats this resolution before the runner starts,
+    // to decide whether the run needs the VM. Change the two together;
+    // tests/vm-decision.sh holds that script to these rules.
     let filter = args.filter.as_deref().unwrap_or("");
     let filter_exact = args.exact;
 
