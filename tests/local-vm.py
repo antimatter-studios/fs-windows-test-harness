@@ -1196,5 +1196,159 @@ class LocalVM(unittest.TestCase):
         self.assertFalse((self.state / vm.RUN_VARS).exists())
 
 
+class SharedBaseVM(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="fswth-shared-test-")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+        self.base = self.root / "base"
+        self.base.mkdir()
+        self.config = {
+            "version": 1,
+            "cpus": 2,
+            "memory_mib": 4096,
+            "ssh_port": 22260,
+            "accelerator": "hvf",
+            "install_started": True,
+            "provisioned": True,
+            "disk": "overlay",
+        }
+        vm.write_json(self.base / "vm.json", self.config)
+        for name in (vm.BASE_DISK, vm.BASE_VARS, "uefi-code.fd", "ssh-key"):
+            (self.base / name).write_bytes(name.encode())
+        self.original = {
+            name: vm.sha256(self.base / name)
+            for name in (vm.BASE_DISK, vm.BASE_VARS, "uefi-code.fd", "ssh-key", "vm.json")
+        }
+
+    def instance(self, name="one", port=22261):
+        state = self.root / name
+        with (
+            patch.object(vm, "tool", side_effect=lambda name: name),
+            patch.object(vm, "running", return_value=None),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(
+                vm.main([
+                    "--state", str(state), "instance", "--base", str(self.base),
+                    "--ssh-port", str(port),
+                ]),
+                0,
+            )
+        return state, vm.load_config(state)
+
+    def assert_base_unchanged(self):
+        self.assertEqual(
+            self.original,
+            {name: vm.sha256(self.base / name) for name in self.original},
+        )
+
+    def test_instances_have_private_disks_vars_ports_sockets_and_locks(self):
+        first, first_config = self.instance()
+        second, second_config = self.instance("two", 22262)
+        for state, config, port in (
+            (first, first_config, 22261), (second, second_config, 22262),
+        ):
+            self.assertEqual(config["base_state"], str(self.base))
+            self.assertFalse((state / vm.BASE_DISK).exists())
+            command = " ".join(vm.qemu_command(state, config))
+            self.assertIn(f"file={state / vm.RUN_DISK}", command)
+            self.assertIn(f"file={state / vm.RUN_VARS}", command)
+            self.assertIn(f"readonly=on,file={self.base / 'uefi-code.fd'}", command)
+            self.assertIn("backing.read-only=on", command)
+            self.assertIn(f"127.0.0.1:{port}-:22", command)
+            self.assertIn(f"Port {port}", (state / "ssh_config").read_text())
+            self.assertTrue((state / "operation.lock").exists())
+        self.assertNotEqual(vm.runtime_dir(first), vm.runtime_dir(second))
+        with vm.exclusive(first), vm.exclusive(second):
+            with self.assertRaisesRegex(RuntimeError, "Another lifecycle"):
+                with vm.exclusive(first):
+                    self.fail("the same instance was locked twice")
+        self.assert_base_unchanged()
+
+    def test_reset_backs_each_overlay_with_the_same_absolute_base(self):
+        for name, port in (("one", 22261), ("two", 22262)):
+            state, config = self.instance(name, port)
+            with patch.object(vm, "run") as run:
+                vm.reset(state)
+            command = [str(value) for value in run.call_args.args[0]]
+            self.assertEqual(command[command.index("-b") + 1], str(self.base / vm.BASE_DISK))
+            self.assertEqual(command[-1], str(state / vm.RUN_DISK))
+            self.assertEqual((state / vm.RUN_VARS).read_bytes(), vm.BASE_VARS.encode())
+            self.assertTrue(config["provisioned"])
+        self.assert_base_unchanged()
+
+    def test_instance_refuses_every_base_writing_lifecycle_action(self):
+        state, config = self.instance()
+        for action in (["up", "--install"], ["provision"], ["down", "--save"], ["boot-installer"]):
+            with (
+                self.subTest(action=action),
+                patch.object(vm, "run") as run,
+                self.assertRaisesRegex(RuntimeError, "shared.base|Shared.base"),
+            ):
+                vm.main(["--state", str(state), *action])
+            run.assert_not_called()
+        self.assert_base_unchanged()
+
+    def test_instance_requires_a_provisioned_base_and_a_different_port(self):
+        self.config["provisioned"] = False
+        vm.write_json(self.base / "vm.json", self.config)
+        with self.assertRaisesRegex(RuntimeError, "provisioned"):
+            self.instance()
+        self.config["provisioned"] = True
+        vm.write_json(self.base / "vm.json", self.config)
+        with self.assertRaisesRegex(RuntimeError, "port"):
+            self.instance(port=22260)
+        with self.assertRaisesRegex(RuntimeError, "already prepared|base.*state"):
+            self.instance(name="base")
+
+    def test_stale_disk_mode_cannot_select_the_shared_base_for_writing(self):
+        state, config = self.instance()
+        config["disk"] = "base"
+        command = " ".join(vm.qemu_command(state, config))
+        self.assertIn(f"file={state / vm.RUN_DISK}", command)
+        self.assertIn("backing.read-only=on", command)
+        self.assertNotIn(f"file={self.base / vm.BASE_DISK}", command)
+        self.assert_base_unchanged()
+
+    def test_direct_save_and_provision_also_refuse_shared_bases(self):
+        state, config = self.instance()
+        for action in (vm.save, vm.provision, vm.boot_installer):
+            with (
+                self.subTest(action=action.__name__),
+                patch.object(vm, "run") as run,
+                self.assertRaisesRegex(RuntimeError, "Shared-base"),
+            ):
+                action(state, config)
+            run.assert_not_called()
+        self.assert_base_unchanged()
+
+    def test_instance_never_overwrites_an_existing_target_file(self):
+        state = self.root / "one"
+        state.mkdir()
+        marker = state / "ssh-key"
+        marker.write_text("keep this key")
+        with self.assertRaisesRegex(RuntimeError, "empty state"):
+            self.instance()
+        self.assertEqual(marker.read_text(), "keep this key")
+        self.assert_base_unchanged()
+
+    def test_instance_rejects_missing_base_files_before_copying_credentials(self):
+        (self.base / "ssh-key").rename(self.base / "saved-key")
+        with self.assertRaisesRegex(RuntimeError, "Shared-base file is missing"):
+            self.instance()
+        self.assertFalse((self.root / "one/ssh-key").exists())
+        self.assertFalse((self.root / "one/vm.json").exists())
+
+    def test_instance_cannot_chain_another_instance_as_its_base(self):
+        state, config = self.instance()
+        with self.assertRaisesRegex(RuntimeError, "original base"):
+            vm.main([
+                "--state", str(self.root / "nested"), "instance",
+                "--base", str(state), "--ssh-port", "22263",
+            ])
+        self.assert_base_unchanged()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -292,6 +292,93 @@ A guest still running from provisioning, or started by an earlier harness
 version, runs on its base disk. Its plain `down` keeps everything, as before;
 `down --save` compacts it in place.
 
+## Several instances, one base
+
+`instance` prepares another VM without copying, rebuilding or changing a
+provisioned reset point. The existing default state,
+`~/.local/share/fs-windows-test-harness/arm64`, remains the base; existing
+single-VM commands and state directories are unchanged.
+
+```sh
+base="$HOME/.local/share/fs-windows-test-harness/arm64"
+first="$HOME/tmp/constellation-loop/windows-a"
+second="$HOME/tmp/constellation-loop/windows-b"
+python3 scripts/local-vm.py --state "$first" instance --base "$base" --ssh-port 22261
+python3 scripts/local-vm.py --state "$second" instance --base "$base" --ssh-port 22262
+python3 scripts/local-vm.py --state "$first" up
+python3 scripts/local-vm.py --state "$second" up
+python3 scripts/local-vm.py --state "$first" wait
+python3 scripts/local-vm.py --state "$second" wait
+python3 scripts/local-vm.py --state "$first" exec -- chore smoke --vm-host fswth-local --vm-workdir C:/fswth/smoke
+python3 scripts/local-vm.py --state "$first" down
+python3 scripts/local-vm.py --state "$second" down
+```
+
+Each instance stores its own `vm.json`, `operation.lock`, SSH transport,
+known-hosts file and a private copy of the base's SSH key. Every boot creates
+`run.qcow2` backed by the **absolute path** to the original `windows.qcow2`,
+plus its own `run-vars.fd` copied from the original `uefi-vars.fd`. QEMU opens
+the backing image and shared firmware code read-only. Each state directory
+gets separate QMP/VNC sockets and a PID file; each instance needs a distinct
+SSH port. A port already in use causes QEMU's launch to fail rather than
+connecting to another guest. CPU and memory settings are inherited from the
+base, not divided between instances.
+
+Only the overlay grows with writes. `down` discards that instance's overlay
+and variables, not the base. Instances refuse `up --install`, `provision`,
+`boot-installer`, and `down --save`; they cannot promote changes into the
+shared reset point. The original base owner retains its existing `--save`
+behavior: **do not save, replace, move or remove a base while any instance
+uses it**. Shut all instances down before deliberately updating the original
+base. A borrowed base cannot itself be another instance.
+
+### One guest, several test runs
+
+Distinct `C:/fswth/<name>` workdirs give independent matrix-run leases; the
+lease is not VM-wide. They do **not** namespace drive letters or a deliberately
+shared directory mountpoint. Give concurrent runs disjoint drive letters,
+mount directories, images, diagnostics and staging destinations. If shipping
+harness scripts, set a private `HARNESS_DIR` for each workdir rather than
+letting both resolve to the default shared sibling directory. Neither
+`max_parallel = "drive-letters"` (a count, not a reservation) nor
+`exclusive_group` (local to one runner process) allocates resources between
+independent runs. Use separate VM instances when consumers cannot guarantee
+those disjoint resources. `local-vm.py exec` also holds its instance's
+operation lock for the complete command, so two separate `exec` invocations
+on the same state intentionally serialize by refusing the second one.
+
+The opt-in real-Windows proof requires existing QEMU, WinFsp in a provisioned
+base, an installed Rust toolchain for the real harness runs, and two free VM
+slots. It installs nothing. On the MacBook, with scratch outside the checkout:
+
+```sh
+python3 -B tests/shared-base-live.py \
+  --state-root "$HOME/tmp/constellation-loop/windows-shared-proof"
+```
+
+It hashes the original base before and after, boots two guests, checks QMP's
+read-only backing nodes, writes distinct contents to the same guest path and
+checks isolation, records boot time, per-file allocated disk bytes and raw
+`vm_stat`, then stops both guests in `finally`. It also runs three pairs of
+real `run-tests.sh` invocations on one guest with independent workdirs and
+X:/Y: mounts, plus repeated WinFsp drive-letter and directory-mount collision
+probes. The resulting `measurement.json` is outside the checkout. `--count 1`
+permits the same-guest experiments alongside one existing Linux VM, but does
+not establish the two-Windows-VM acceptance criterion. The VM-free tests in
+`chore local-vm` remain the CI regression tier. A separate opt-in image oracle
+uses installed `qemu-img` and `qemu-io`, without booting a guest, to write
+different patterns through two real qcow2 overlays and verify both patterns
+and the unchanged backing image:
+
+```sh
+python3 -B tests/shared-base-image.py \
+  --state-root "$HOME/tmp/constellation-loop/windows-image-proof"
+```
+
+The [2026-11-03 measurements](validation/shared-base-2026-11-03/README.md)
+distinguish the checks actually run from the remaining simultaneous-guest
+acceptance check.
+
 ## Acceptance
 
 `chore local-vm` tests lifecycle decisions, download integrity, locking and
