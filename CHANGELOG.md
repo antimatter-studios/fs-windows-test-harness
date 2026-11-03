@@ -8,6 +8,25 @@ pull request; a release gathers them into a section here.
 
 ## [Unreleased]
 
+## v4.6.0 — 2026-11-03
+
+### Added
+
+- `local-vm.py instance` takes `--cpus` and `--memory-mib`, so one instance can run at another size without changing the base. An instance not given them inherits the base's.
+
+- Optional virtio-fs image sharing, its guest driver setup, and fenced ship steps that copy through a configured shared directory.
+
+- `local-vm.py --state <instance> instance --base <provisioned-state> --ssh-port <port>` creates independent Windows VM instances backed by one read-only base disk, without copying or rebuilding it. Each instance has its own boot overlay, UEFI variables, SSH transport, runtime sockets and operation lock; existing single-VM commands and state directories are unchanged.
+- An opt-in real-Windows sharing proof records backing-disk immutability, per-instance disk usage, boot time, host memory, concurrent harness runs and drive-letter and mountpoint collisions.
+
+### Changed
+
+- Linux QEMU startup checks its inherited memory policy, requests local allocation for interleaving, and reports the effective result.
+
+### Fixed
+
+- **A matrix run from macOS bash 3.2 no longer reports success having run nothing (#62).** `run-tests.sh` no longer needs `BASHPID`, and a run that dies before its end now fails, because bash 3.2 reports `$?=0` to an EXIT trap after `set -u` kills the script.
+
 ## v4.5.0 — 2026-10-11
 
 ### Changed (consumers that install tools into the QEMU guest must save them)
