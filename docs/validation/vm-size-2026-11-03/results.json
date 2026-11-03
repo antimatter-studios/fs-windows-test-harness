@@ -1,0 +1,996 @@
+[
+ {
+  "waited_for_slot_seconds": 70,
+  "memory_mib": 2048,
+  "cpus": 2,
+  "round": 1,
+  "other_vms_before": [
+   {
+    "pid": 33289,
+    "memory": "4G"
+   }
+  ],
+  "host_before": {
+   "free_gib": 1.3,
+   "inactive_gib": 14.97,
+   "compressor_gib": 23.9,
+   "pageouts": 21093420,
+   "swapouts": 4395670
+  },
+  "started_utc": "2026-11-03T12:43:27Z",
+  "boot_seconds": 38.9,
+  "matrix": [
+   {
+    "consumer": "rust-fs-ntfs",
+    "filter": "mac-format-tiny-32mib",
+    "exit": 0,
+    "wall_seconds": 52.7,
+    "runner_seconds": 29.67,
+    "cargo_finished": [
+     "0.30s"
+    ],
+    "epoch": [
+     1793709849,
+     1793709902
+    ],
+    "scenarios": [
+     {
+      "name": "mac-format-tiny-32mib",
+      "status": "passed",
+      "seconds": 29.7,
+      "error": ""
+     }
+    ],
+    "guest": {
+     "samples": 16,
+     "guest_total_mib": 2039,
+     "guest_cpus": 2,
+     "peak_used_mib": 1171,
+     "min_available_mib": 868,
+     "peak_commit_mib": 1124,
+     "pages_in_per_sec_peak": 32839,
+     "pages_in_per_sec_mean": 2258.2,
+     "pages_out_per_sec_peak": 0,
+     "cpu_percent_mean": 25.6
+    }
+   },
+   {
+    "consumer": "rust-fs-ntfs",
+    "filter": "smoke",
+    "exit": 0,
+    "wall_seconds": 170.9,
+    "runner_seconds": 168.92,
+    "cargo_finished": [
+     "0.07s"
+    ],
+    "epoch": [
+     1793709902,
+     1793710072
+    ],
+    "scenarios": [
+     {
+      "name": "mac-format-basic-256mib",
+      "status": "passed",
+      "seconds": 84.3,
+      "error": ""
+     },
+     {
+      "name": "mac-format-mac-write-win-repeat-mount-3-win-chkdsk",
+      "status": "passed",
+      "seconds": 84.8,
+      "error": ""
+     },
+     {
+      "name": "mac-format-mkdir-set-dirty-win-chkdsk",
+      "status": "passed",
+      "seconds": 50.9,
+      "error": ""
+     },
+     {
+      "name": "mac-format-tiny-32mib",
+      "status": "passed",
+      "seconds": 36.2,
+      "error": ""
+     },
+     {
+      "name": "mac-format-win-write-many-win-delete-half-win-chkdsk",
+      "status": "passed",
+      "seconds": 132.7,
+      "error": ""
+     }
+    ],
+    "guest": {
+     "samples": 65,
+     "guest_total_mib": 2039,
+     "guest_cpus": 2,
+     "peak_used_mib": 1403,
+     "min_available_mib": 636,
+     "peak_commit_mib": 1817,
+     "pages_in_per_sec_peak": 95280,
+     "pages_in_per_sec_mean": 7766.2,
+     "pages_out_per_sec_peak": 245,
+     "cpu_percent_mean": 60.3
+    }
+   },
+   {
+    "consumer": "xfs-win-driver",
+    "filter": "win-mount",
+    "exit": 0,
+    "wall_seconds": 704.8,
+    "runner_seconds": 237.0,
+    "cargo_finished": [
+     "7m 23s",
+     "0.18s"
+    ],
+    "epoch": [
+     1793710075,
+     1793710780
+    ],
+    "scenarios": [
+     {
+      "name": "win-mount-cat-pattern",
+      "status": "passed",
+      "seconds": 89.4,
+      "error": ""
+     },
+     {
+      "name": "win-mount-cat-rmap-deep",
+      "status": "passed",
+      "seconds": 40.0,
+      "error": ""
+     },
+     {
+      "name": "win-mount-cat-small",
+      "status": "passed",
+      "seconds": 49.1,
+      "error": ""
+     },
+     {
+      "name": "win-mount-ls-root",
+      "status": "passed",
+      "seconds": 58.5,
+      "error": ""
+     }
+    ],
+    "guest": {
+     "samples": 223,
+     "guest_total_mib": 2039,
+     "guest_cpus": 2,
+     "peak_used_mib": 1380,
+     "min_available_mib": 659,
+     "peak_commit_mib": 2031,
+     "pages_in_per_sec_peak": 14130,
+     "pages_in_per_sec_mean": 320.2,
+     "pages_out_per_sec_peak": 361,
+     "cpu_percent_mean": 92.8
+    }
+   }
+  ],
+  "host_during": {
+   "free_gib": 0.5,
+   "inactive_gib": 15.85,
+   "compressor_gib": 24.51,
+   "pageouts": 21183269,
+   "swapouts": 4395670
+  },
+  "other_vms_after": [
+   {
+    "pid": 33289,
+    "memory": "4G"
+   },
+   {
+    "pid": 53580,
+    "memory": "4G"
+   }
+  ],
+  "guest": {
+   "samples": 304,
+   "guest_total_mib": 2039,
+   "guest_cpus": 2,
+   "peak_used_mib": 1403,
+   "min_available_mib": 636,
+   "peak_commit_mib": 2031,
+   "pages_in_per_sec_peak": 95280,
+   "pages_in_per_sec_mean": 2017.4,
+   "pages_out_per_sec_peak": 361,
+   "cpu_percent_mean": 82.5
+  },
+  "host_after": {
+   "free_gib": 2.76,
+   "inactive_gib": 15.15,
+   "compressor_gib": 23.98,
+   "pageouts": 21183295,
+   "swapouts": 4395670
+  }
+ },
+ {
+  "waited_for_slot_seconds": 632,
+  "memory_mib": 4096,
+  "cpus": 2,
+  "round": 1,
+  "other_vms_before": [
+   {
+    "pid": 33289,
+    "memory": "4G"
+   }
+  ],
+  "host_before": {
+   "free_gib": 0.07,
+   "inactive_gib": 15.59,
+   "compressor_gib": 24.65,
+   "pageouts": 21204009,
+   "swapouts": 4395670
+  },
+  "started_utc": "2026-11-03T13:12:11Z",
+  "boot_seconds": 22.6,
+  "matrix": [
+   {
+    "consumer": "rust-fs-ntfs",
+    "filter": "mac-format-tiny-32mib",
+    "exit": 0,
+    "wall_seconds": 43.3,
+    "runner_seconds": 26.91,
+    "cargo_finished": [
+     "0.09s"
+    ],
+    "epoch": [
+     1793711555,
+     1793711598
+    ],
+    "scenarios": [
+     {
+      "name": "mac-format-tiny-32mib",
+      "status": "passed",
+      "seconds": 26.9,
+      "error": ""
+     }
+    ],
+    "guest": {
+     "samples": 14,
+     "guest_total_mib": 4087,
+     "guest_cpus": 2,
+     "peak_used_mib": 1338,
+     "min_available_mib": 2749,
+     "peak_commit_mib": 1185,
+     "pages_in_per_sec_peak": 1491,
+     "pages_in_per_sec_mean": 312.6,
+     "pages_out_per_sec_peak": 0,
+     "cpu_percent_mean": 37.0
+    }
+   },
+   {
+    "consumer": "rust-fs-ntfs",
+    "filter": "smoke",
+    "exit": 0,
+    "wall_seconds": 143.3,
+    "runner_seconds": 141.39,
+    "cargo_finished": [
+     "0.06s"
+    ],
+    "epoch": [
+     1793711598,
+     1793711742
+    ],
+    "scenarios": [
+     {
+      "name": "mac-format-basic-256mib",
+      "status": "passed",
+      "seconds": 64.5,
+      "error": ""
+     },
+     {
+      "name": "mac-format-mac-write-win-repeat-mount-3-win-chkdsk",
+      "status": "passed",
+      "seconds": 74.9,
+      "error": ""
+     },
+     {
+      "name": "mac-format-mkdir-set-dirty-win-chkdsk",
+      "status": "passed",
+      "seconds": 47.1,
+      "error": ""
+     },
+     {
+      "name": "mac-format-tiny-32mib",
+      "status": "passed",
+      "seconds": 31.4,
+      "error": ""
+     },
+     {
+      "name": "mac-format-win-write-many-win-delete-half-win-chkdsk",
+      "status": "passed",
+      "seconds": 110.0,
+      "error": ""
+     }
+    ],
+    "guest": {
+     "samples": 56,
+     "guest_total_mib": 4087,
+     "guest_cpus": 2,
+     "peak_used_mib": 1943,
+     "min_available_mib": 2144,
+     "peak_commit_mib": 1883,
+     "pages_in_per_sec_peak": 181844,
+     "pages_in_per_sec_mean": 4511.9,
+     "pages_out_per_sec_peak": 0,
+     "cpu_percent_mean": 55.8
+    }
+   },
+   {
+    "consumer": "xfs-win-driver",
+    "filter": "win-mount",
+    "exit": 0,
+    "wall_seconds": 146.7,
+    "runner_seconds": 54.74,
+    "cargo_finished": [
+     "1m 19s",
+     "0.11s"
+    ],
+    "epoch": [
+     1793711743,
+     1793711889
+    ],
+    "scenarios": [
+     {
+      "name": "win-mount-cat-pattern",
+      "status": "passed",
+      "seconds": 13.7,
+      "error": ""
+     },
+     {
+      "name": "win-mount-cat-rmap-deep",
+      "status": "passed",
+      "seconds": 13.9,
+      "error": ""
+     },
+     {
+      "name": "win-mount-cat-small",
+      "status": "passed",
+      "seconds": 12.2,
+      "error": ""
+     },
+     {
+      "name": "win-mount-ls-root",
+      "status": "passed",
+      "seconds": 15.0,
+      "error": ""
+     }
+    ],
+    "guest": {
+     "samples": 57,
+     "guest_total_mib": 4087,
+     "guest_cpus": 2,
+     "peak_used_mib": 1972,
+     "min_available_mib": 2115,
+     "peak_commit_mib": 1945,
+     "pages_in_per_sec_peak": 19211,
+     "pages_in_per_sec_mean": 605.5,
+     "pages_out_per_sec_peak": 0,
+     "cpu_percent_mean": 80.7
+    }
+   }
+  ],
+  "host_during": {
+   "free_gib": 0.58,
+   "inactive_gib": 15.45,
+   "compressor_gib": 25.23,
+   "pageouts": 21209024,
+   "swapouts": 4395670
+  },
+  "other_vms_after": [
+   {
+    "pid": 33289,
+    "memory": "4G"
+   }
+  ],
+  "guest": {
+   "samples": 126,
+   "guest_total_mib": 4087,
+   "guest_cpus": 2,
+   "peak_used_mib": 1972,
+   "min_available_mib": 2115,
+   "peak_commit_mib": 1945,
+   "pages_in_per_sec_peak": 181844,
+   "pages_in_per_sec_mean": 2307.4,
+   "pages_out_per_sec_peak": 0,
+   "cpu_percent_mean": 64.9
+  },
+  "host_after": {
+   "free_gib": 4.48,
+   "inactive_gib": 14.27,
+   "compressor_gib": 24.89,
+   "pageouts": 21209045,
+   "swapouts": 4395670
+  }
+ },
+ {
+  "waited_for_slot_seconds": 0,
+  "memory_mib": 3072,
+  "cpus": 2,
+  "round": 1,
+  "other_vms_before": [
+   {
+    "pid": 33289,
+    "memory": "4G"
+   }
+  ],
+  "host_before": {
+   "free_gib": 0.06,
+   "inactive_gib": 13.5,
+   "compressor_gib": 28.94,
+   "pageouts": 22089472,
+   "swapouts": 4395670
+  },
+  "started_utc": "2026-11-03T13:57:06Z",
+  "boot_seconds": 23.6,
+  "matrix": [
+   {
+    "consumer": "rust-fs-ntfs",
+    "filter": "mac-format-tiny-32mib",
+    "exit": 0,
+    "wall_seconds": 43.9,
+    "runner_seconds": 27.3,
+    "cargo_finished": [
+     "0.20s"
+    ],
+    "epoch": [
+     1793714251,
+     1793714295
+    ],
+    "scenarios": [
+     {
+      "name": "mac-format-tiny-32mib",
+      "status": "passed",
+      "seconds": 27.3,
+      "error": ""
+     }
+    ],
+    "guest": {
+     "samples": 14,
+     "guest_total_mib": 3063,
+     "guest_cpus": 2,
+     "peak_used_mib": 1282,
+     "min_available_mib": 1781,
+     "peak_commit_mib": 1132,
+     "pages_in_per_sec_peak": 837,
+     "pages_in_per_sec_mean": 174.8,
+     "pages_out_per_sec_peak": 0,
+     "cpu_percent_mean": 28.4
+    }
+   },
+   {
+    "consumer": "rust-fs-ntfs",
+    "filter": "smoke",
+    "exit": 0,
+    "wall_seconds": 163.0,
+    "runner_seconds": 160.89,
+    "cargo_finished": [
+     "0.09s"
+    ],
+    "epoch": [
+     1793714295,
+     1793714458
+    ],
+    "scenarios": [
+     {
+      "name": "mac-format-basic-256mib",
+      "status": "passed",
+      "seconds": 73.6,
+      "error": ""
+     },
+     {
+      "name": "mac-format-mac-write-win-repeat-mount-3-win-chkdsk",
+      "status": "passed",
+      "seconds": 83.1,
+      "error": ""
+     },
+     {
+      "name": "mac-format-mkdir-set-dirty-win-chkdsk",
+      "status": "passed",
+      "seconds": 53.7,
+      "error": ""
+     },
+     {
+      "name": "mac-format-tiny-32mib",
+      "status": "passed",
+      "seconds": 36.2,
+      "error": ""
+     },
+     {
+      "name": "mac-format-win-write-many-win-delete-half-win-chkdsk",
+      "status": "passed",
+      "seconds": 124.7,
+      "error": ""
+     }
+    ],
+    "guest": {
+     "samples": 62,
+     "guest_total_mib": 3063,
+     "guest_cpus": 2,
+     "peak_used_mib": 1779,
+     "min_available_mib": 1284,
+     "peak_commit_mib": 1799,
+     "pages_in_per_sec_peak": 132457,
+     "pages_in_per_sec_mean": 3595.3,
+     "pages_out_per_sec_peak": 0,
+     "cpu_percent_mean": 58.0
+    }
+   },
+   {
+    "consumer": "xfs-win-driver",
+    "filter": "win-mount",
+    "exit": 0,
+    "wall_seconds": 210.6,
+    "runner_seconds": 86.82,
+    "cargo_finished": [
+     "1m 44s",
+     "0.10s"
+    ],
+    "epoch": [
+     1793714460,
+     1793714671
+    ],
+    "scenarios": [
+     {
+      "name": "win-mount-cat-pattern",
+      "status": "passed",
+      "seconds": 18.2,
+      "error": ""
+     },
+     {
+      "name": "win-mount-cat-rmap-deep",
+      "status": "passed",
+      "seconds": 23.9,
+      "error": ""
+     },
+     {
+      "name": "win-mount-cat-small",
+      "status": "passed",
+      "seconds": 20.8,
+      "error": ""
+     },
+     {
+      "name": "win-mount-ls-root",
+      "status": "passed",
+      "seconds": 23.9,
+      "error": ""
+     }
+    ],
+    "guest": {
+     "samples": 78,
+     "guest_total_mib": 3063,
+     "guest_cpus": 2,
+     "peak_used_mib": 1884,
+     "min_available_mib": 1179,
+     "peak_commit_mib": 2056,
+     "pages_in_per_sec_peak": 14984,
+     "pages_in_per_sec_mean": 410.2,
+     "pages_out_per_sec_peak": 0,
+     "cpu_percent_mean": 83.8
+    }
+   }
+  ],
+  "host_during": {
+   "free_gib": 1.1,
+   "inactive_gib": 12.16,
+   "compressor_gib": 31.05,
+   "pageouts": 22096723,
+   "swapouts": 4395670
+  },
+  "other_vms_after": [
+   {
+    "pid": 33289,
+    "memory": "4G"
+   }
+  ],
+  "guest": {
+   "samples": 154,
+   "guest_total_mib": 3063,
+   "guest_cpus": 2,
+   "peak_used_mib": 1884,
+   "min_available_mib": 1179,
+   "peak_commit_mib": 2056,
+   "pages_in_per_sec_peak": 132457,
+   "pages_in_per_sec_mean": 1671.1,
+   "pages_out_per_sec_peak": 0,
+   "cpu_percent_mean": 68.4
+  },
+  "host_after": {
+   "free_gib": 3.68,
+   "inactive_gib": 11.93,
+   "compressor_gib": 29.61,
+   "pageouts": 22096723,
+   "swapouts": 4395670
+  }
+ },
+ {
+  "waited_for_slot_seconds": 0,
+  "memory_mib": 4096,
+  "cpus": 4,
+  "round": 1,
+  "other_vms_before": [
+   {
+    "pid": 33289,
+    "memory": "4G"
+   }
+  ],
+  "host_before": {
+   "free_gib": 3.32,
+   "inactive_gib": 11.89,
+   "compressor_gib": 29.6,
+   "pageouts": 22096723,
+   "swapouts": 4395670
+  },
+  "started_utc": "2026-11-03T14:04:36Z",
+  "boot_seconds": 28.9,
+  "matrix": [
+   {
+    "consumer": "rust-fs-ntfs",
+    "filter": "mac-format-tiny-32mib",
+    "exit": 0,
+    "wall_seconds": 46.7,
+    "runner_seconds": 26.99,
+    "cargo_finished": [
+     "0.14s"
+    ],
+    "epoch": [
+     1793714707,
+     1793714754
+    ],
+    "scenarios": [
+     {
+      "name": "mac-format-tiny-32mib",
+      "status": "passed",
+      "seconds": 27.0,
+      "error": ""
+     }
+    ],
+    "guest": {
+     "samples": 15,
+     "guest_total_mib": 4087,
+     "guest_cpus": 4,
+     "peak_used_mib": 1367,
+     "min_available_mib": 2720,
+     "peak_commit_mib": 1209,
+     "pages_in_per_sec_peak": 15172,
+     "pages_in_per_sec_mean": 1198.0,
+     "pages_out_per_sec_peak": 0,
+     "cpu_percent_mean": 26.4
+    }
+   },
+   {
+    "consumer": "rust-fs-ntfs",
+    "filter": "smoke",
+    "exit": 0,
+    "wall_seconds": 231.6,
+    "runner_seconds": 229.55,
+    "cargo_finished": [
+     "0.06s"
+    ],
+    "epoch": [
+     1793714754,
+     1793714986
+    ],
+    "scenarios": [
+     {
+      "name": "mac-format-basic-256mib",
+      "status": "passed",
+      "seconds": 61.7,
+      "error": ""
+     },
+     {
+      "name": "mac-format-mac-write-win-repeat-mount-3-win-chkdsk",
+      "status": "passed",
+      "seconds": 73.5,
+      "error": ""
+     },
+     {
+      "name": "mac-format-mkdir-set-dirty-win-chkdsk",
+      "status": "passed",
+      "seconds": 229.5,
+      "error": ""
+     },
+     {
+      "name": "mac-format-tiny-32mib",
+      "status": "passed",
+      "seconds": 30.0,
+      "error": ""
+     },
+     {
+      "name": "mac-format-win-write-many-win-delete-half-win-chkdsk",
+      "status": "passed",
+      "seconds": 189.5,
+      "error": ""
+     }
+    ],
+    "guest": {
+     "samples": 81,
+     "guest_total_mib": 4087,
+     "guest_cpus": 4,
+     "peak_used_mib": 2013,
+     "min_available_mib": 2074,
+     "peak_commit_mib": 1914,
+     "pages_in_per_sec_peak": 256171,
+     "pages_in_per_sec_mean": 5994.7,
+     "pages_out_per_sec_peak": 0,
+     "cpu_percent_mean": 48.2
+    }
+   },
+   {
+    "consumer": "xfs-win-driver",
+    "filter": "win-mount",
+    "exit": 0,
+    "wall_seconds": 245.0,
+    "runner_seconds": 59.58,
+    "cargo_finished": [
+     "1m 15s",
+     "0.09s"
+    ],
+    "epoch": [
+     1793714998,
+     1793715243
+    ],
+    "scenarios": [
+     {
+      "name": "win-mount-cat-pattern",
+      "status": "passed",
+      "seconds": 13.4,
+      "error": ""
+     },
+     {
+      "name": "win-mount-cat-rmap-deep",
+      "status": "passed",
+      "seconds": 16.8,
+      "error": ""
+     },
+     {
+      "name": "win-mount-cat-small",
+      "status": "passed",
+      "seconds": 13.2,
+      "error": ""
+     },
+     {
+      "name": "win-mount-ls-root",
+      "status": "passed",
+      "seconds": 16.3,
+      "error": ""
+     }
+    ],
+    "guest": {
+     "samples": 80,
+     "guest_total_mib": 4087,
+     "guest_cpus": 4,
+     "peak_used_mib": 2272,
+     "min_available_mib": 1815,
+     "peak_commit_mib": 2380,
+     "pages_in_per_sec_peak": 59959,
+     "pages_in_per_sec_mean": 1361.7,
+     "pages_out_per_sec_peak": 0,
+     "cpu_percent_mean": 71.3
+    }
+   }
+  ],
+  "host_during": {
+   "free_gib": 0.06,
+   "inactive_gib": 12.45,
+   "compressor_gib": 31.09,
+   "pageouts": 22100937,
+   "swapouts": 4395670
+  },
+  "other_vms_after": [
+   {
+    "pid": 33289,
+    "memory": "4G"
+   }
+  ],
+  "guest": {
+   "samples": 179,
+   "guest_total_mib": 4087,
+   "guest_cpus": 4,
+   "peak_used_mib": 2272,
+   "min_available_mib": 1815,
+   "peak_commit_mib": 2380,
+   "pages_in_per_sec_peak": 256171,
+   "pages_in_per_sec_mean": 3516.9,
+   "pages_out_per_sec_peak": 0,
+   "cpu_percent_mean": 57.2
+  },
+  "host_after": {
+   "free_gib": 4.06,
+   "inactive_gib": 11.77,
+   "compressor_gib": 29.07,
+   "pageouts": 22100966,
+   "swapouts": 4395670
+  }
+ },
+ {
+  "waited_for_slot_seconds": 0,
+  "memory_mib": 3072,
+  "cpus": 2,
+  "round": 2,
+  "other_vms_before": [],
+  "host_before": {
+   "free_gib": 0.06,
+   "inactive_gib": 13.03,
+   "compressor_gib": 30.64,
+   "pageouts": 22101490,
+   "swapouts": 4395670
+  },
+  "started_utc": "2026-11-03T14:14:50Z",
+  "boot_seconds": 23.0,
+  "matrix": [
+   {
+    "consumer": "rust-fs-ntfs",
+    "filter": "mac-format-tiny-32mib",
+    "exit": 0,
+    "wall_seconds": 44.5,
+    "runner_seconds": 26.29,
+    "cargo_finished": [
+     "0.12s"
+    ],
+    "epoch": [
+     1793715314,
+     1793715359
+    ],
+    "scenarios": [
+     {
+      "name": "mac-format-tiny-32mib",
+      "status": "passed",
+      "seconds": 26.3,
+      "error": ""
+     }
+    ],
+    "guest": {
+     "samples": 14,
+     "guest_total_mib": 3063,
+     "guest_cpus": 2,
+     "peak_used_mib": 1288,
+     "min_available_mib": 1775,
+     "peak_commit_mib": 1128,
+     "pages_in_per_sec_peak": 4627,
+     "pages_in_per_sec_mean": 836.3,
+     "pages_out_per_sec_peak": 0,
+     "cpu_percent_mean": 24.3
+    }
+   },
+   {
+    "consumer": "rust-fs-ntfs",
+    "filter": "smoke",
+    "exit": 0,
+    "wall_seconds": 157.2,
+    "runner_seconds": 155.14,
+    "cargo_finished": [
+     "0.06s"
+    ],
+    "epoch": [
+     1793715359,
+     1793715516
+    ],
+    "scenarios": [
+     {
+      "name": "mac-format-basic-256mib",
+      "status": "passed",
+      "seconds": 75.4,
+      "error": ""
+     },
+     {
+      "name": "mac-format-mac-write-win-repeat-mount-3-win-chkdsk",
+      "status": "passed",
+      "seconds": 85.9,
+      "error": ""
+     },
+     {
+      "name": "mac-format-mkdir-set-dirty-win-chkdsk",
+      "status": "passed",
+      "seconds": 55.5,
+      "error": ""
+     },
+     {
+      "name": "mac-format-tiny-32mib",
+      "status": "passed",
+      "seconds": 39.9,
+      "error": ""
+     },
+     {
+      "name": "mac-format-win-write-many-win-delete-half-win-chkdsk",
+      "status": "passed",
+      "seconds": 115.3,
+      "error": ""
+     }
+    ],
+    "guest": {
+     "samples": 61,
+     "guest_total_mib": 3063,
+     "guest_cpus": 2,
+     "peak_used_mib": 1812,
+     "min_available_mib": 1251,
+     "peak_commit_mib": 1813,
+     "pages_in_per_sec_peak": 257488,
+     "pages_in_per_sec_mean": 6846.5,
+     "pages_out_per_sec_peak": 0,
+     "cpu_percent_mean": 58.4
+    }
+   },
+   {
+    "consumer": "xfs-win-driver",
+    "filter": "win-mount",
+    "exit": 0,
+    "wall_seconds": 173.3,
+    "runner_seconds": 64.85,
+    "cargo_finished": [
+     "1m 33s",
+     "0.09s"
+    ],
+    "epoch": [
+     1793715517,
+     1793715691
+    ],
+    "scenarios": [
+     {
+      "name": "win-mount-cat-pattern",
+      "status": "passed",
+      "seconds": 17.8,
+      "error": ""
+     },
+     {
+      "name": "win-mount-cat-rmap-deep",
+      "status": "passed",
+      "seconds": 17.1,
+      "error": ""
+     },
+     {
+      "name": "win-mount-cat-small",
+      "status": "passed",
+      "seconds": 17.5,
+      "error": ""
+     },
+     {
+      "name": "win-mount-ls-root",
+      "status": "passed",
+      "seconds": 12.5,
+      "error": ""
+     }
+    ],
+    "guest": {
+     "samples": 65,
+     "guest_total_mib": 3063,
+     "guest_cpus": 2,
+     "peak_used_mib": 1771,
+     "min_available_mib": 1292,
+     "peak_commit_mib": 1886,
+     "pages_in_per_sec_peak": 6336,
+     "pages_in_per_sec_mean": 373.0,
+     "pages_out_per_sec_peak": 0,
+     "cpu_percent_mean": 82.7
+    }
+   }
+  ],
+  "host_during": {
+   "free_gib": 0.11,
+   "inactive_gib": 13.14,
+   "compressor_gib": 29.15,
+   "pageouts": 22109889,
+   "swapouts": 4395670
+  },
+  "other_vms_after": [],
+  "guest": {
+   "samples": 139,
+   "guest_total_mib": 3063,
+   "guest_cpus": 2,
+   "peak_used_mib": 1812,
+   "min_available_mib": 1251,
+   "peak_commit_mib": 1886,
+   "pages_in_per_sec_peak": 257488,
+   "pages_in_per_sec_mean": 3263.2,
+   "pages_out_per_sec_peak": 0,
+   "cpu_percent_mean": 66.7
+  },
+  "host_after": {
+   "free_gib": 3.25,
+   "inactive_gib": 12.33,
+   "compressor_gib": 28.65,
+   "pageouts": 22109991,
+   "swapouts": 4395670
+  }
+ }
+]
