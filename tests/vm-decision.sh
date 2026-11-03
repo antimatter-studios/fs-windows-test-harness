@@ -231,6 +231,35 @@ expect_vm_run "no filter, on a matrix holding VM scenarios"
 run_filter matches-nothing
 expect_host_run "a filter matching no scenario and no group"
 
+expect_list() {
+    local filter="$1" expected="$2" actual
+    CASE=$((CASE + 1))
+    DIR="${WORK_DIR}/case-${CASE}"
+    make_consumer "${DIR}"
+    : > "${DIR}/journal"
+    (
+        cd "${DIR}" || exit 99
+        PATH="${BIN}:${PATH}" STAND_IN_JOURNAL="${DIR}/journal" \
+            /bin/bash "${HARNESS_ROOT}/scripts/run-tests.sh" --list ${filter:+"${filter}"}
+    ) > "${DIR}/out.txt" 2>&1 < /dev/null
+    RC=$?
+    actual="$(sed -n 's/^  \[.\] \([^ ]*\).*/\1/p' "${DIR}/out.txt")"
+    if [[ "${RC}" -eq 0 && "${actual}" == "${expected}" \
+          && ! -s "${DIR}/journal" && ! -e "${DIR}/.test-env" ]]; then
+        ok "--list '${filter}': selection matches, offline"
+    else
+        bad "--list '${filter}': expected '${expected}', got '${actual}' ($(evidence))"
+    fi
+}
+
+expect_list vm-group $'vm-one\nvm-two'
+expect_list empty-group no-recipe
+expect_list host $'host-one\nhost-two'
+expect_list vm $'vm-one\nvm-two'
+expect_list no-rec no-recipe
+expect_list "" $'host-one\nhost-two\nno-recipe\nvm-one\nvm-two'
+expect_list matches-nothing ""
+
 echo "==============================================================="
 echo "  results: ${PASS} passed, ${FAIL} failed"
 echo "==============================================================="
