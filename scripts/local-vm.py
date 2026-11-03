@@ -440,6 +440,10 @@ def instance(state, args):
         if not (base / name).is_file():
             raise RuntimeError(f"Shared-base file is missing: {base / name}")
     config.update(base_state=str(base), ssh_port=args.ssh_port, disk="overlay")
+    if args.cpus is not None:
+        config["cpus"] = args.cpus
+    if args.memory_mib is not None:
+        config["memory_mib"] = args.memory_mib
     shutil.copyfile(base / "ssh-key", state / "ssh-key")
     (state / "ssh-key").chmod(0o600)
     transport(state, args.ssh_port)
@@ -1015,6 +1019,8 @@ def parse_args(argv=None):
     child.add_argument(
         "--ssh-port", type=int, required=True, help="unique loopback SSH port"
     )
+    child.add_argument("--cpus", type=positive, help="default: the base's")
+    child.add_argument("--memory-mib", type=positive, help="default: the base's")
     start = sub.add_parser("up", help="start once; reuse a running VM")
     start.add_argument(
         "--share",

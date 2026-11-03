@@ -1221,7 +1221,7 @@ class SharedBaseVM(unittest.TestCase):
             for name in (vm.BASE_DISK, vm.BASE_VARS, "uefi-code.fd", "ssh-key", "vm.json")
         }
 
-    def instance(self, name="one", port=22261):
+    def instance(self, name="one", port=22261, extra=()):
         state = self.root / name
         with (
             patch.object(vm, "tool", side_effect=lambda name: name),
@@ -1231,7 +1231,7 @@ class SharedBaseVM(unittest.TestCase):
             self.assertEqual(
                 vm.main([
                     "--state", str(state), "instance", "--base", str(self.base),
-                    "--ssh-port", str(port),
+                    "--ssh-port", str(port), *extra,
                 ]),
                 0,
             )
@@ -1277,6 +1277,22 @@ class SharedBaseVM(unittest.TestCase):
             self.assertEqual((state / vm.RUN_VARS).read_bytes(), vm.BASE_VARS.encode())
             self.assertTrue(config["provisioned"])
         self.assert_base_unchanged()
+
+    def test_an_instance_can_size_its_guest_without_changing_the_base(self):
+        state, config = self.instance(extra=("--cpus", "4", "--memory-mib", "3072"))
+        command = vm.qemu_command(state, config)
+        self.assertEqual(command[command.index("-smp") + 1], "4")
+        self.assertEqual(command[command.index("-m") + 1], "3072")
+        self.assert_base_unchanged()
+
+    def test_an_instance_inherits_the_size_it_is_not_given(self):
+        state, config = self.instance(extra=("--memory-mib", "3072"))
+        command = vm.qemu_command(state, config)
+        self.assertEqual(command[command.index("-smp") + 1], "2")
+        self.assertEqual(command[command.index("-m") + 1], "3072")
+        state, config = self.instance("two", 22262)
+        command = vm.qemu_command(state, config)
+        self.assertEqual(command[command.index("-m") + 1], "4096")
 
     def test_instance_refuses_every_base_writing_lifecycle_action(self):
         state, config = self.instance()

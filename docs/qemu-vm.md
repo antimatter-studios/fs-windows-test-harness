@@ -322,7 +322,8 @@ the backing image and shared firmware code read-only. Each state directory
 gets separate QMP/VNC sockets and a PID file; each instance needs a distinct
 SSH port. A port already in use causes QEMU's launch to fail rather than
 connecting to another guest. CPU and memory settings are inherited from the
-base, not divided between instances.
+base, not divided between instances, unless `instance` is given `--cpus` or
+`--memory-mib`. Those change only that instance's `vm.json`.
 
 Only the overlay grows with writes. `down` discards that instance's overlay
 and variables, not the base. Instances refuse `up --install`, `provision`,
