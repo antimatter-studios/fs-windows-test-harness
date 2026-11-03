@@ -182,47 +182,19 @@ if [[ "${DO_RESET}" == "1" && -f "${ENV_FILE}" ]]; then
     rm -f "${ENV_FILE}"
 fi
 
-# ── --list: offline; just walk test-matrix.json ─────────────────
-if [[ "${DO_LIST}" == "1" ]]; then
-    if [[ ! -f "${matrix_full}" ]]; then
-        echo "[run-tests] matrix not found: ${matrix_full}" >&2
-        exit 2
-    fi
-    python3 - "${matrix_full}" "${SCENARIO}" <<'PYEOF'
-import json, sys
-matrix_path, pat = sys.argv[1], sys.argv[2]
-m = json.load(open(matrix_path))
-for name in sorted(m.get("scenarios", {})):
-    s = m["scenarios"][name]
-    if not isinstance(s, dict):
-        continue
-    if pat and pat not in name:
-        continue
-    has_recipe = "recipe" in s and s["recipe"]
-    mark = " " if has_recipe else "*"
-    status = s.get("status", "")
-    print(f"  [{mark}] {name:<55} {status}")
-print()
-print("(* = no recipe — scenario is a marker / blocked / pre-v2 stub)")
-PYEOF
-    exit 0
-fi
-
-# ── detect: do any matched scenarios need the VM? ───────────────
-# Only run the SSH preflight + bootstrap for scenarios that actually
-# need the VM. Pure host-side recipes don't.
-NEEDS_VM=0
-if [[ -f "${matrix_full}" ]]; then
-    NEEDS_VM=$(python3 - "${matrix_full}" "${SCENARIO}" "${harness_toml}" <<'PYEOF'
-import json, sys
+matrix_selection() {
+    python3 - "${matrix_full}" "${SCENARIO}" "${harness_toml}" "$1" <<'PYEOF'
+import json, os, sys
 try:
     import tomllib
 except ImportError:
     import tomli as tomllib
 m = json.load(open(sys.argv[1]))
 pat = sys.argv[2]
-with open(sys.argv[3], 'rb') as f:
-    cfg = tomllib.load(f)
+cfg = {}
+if sys.argv[4] != "list" or os.path.isfile(sys.argv[3]):
+    with open(sys.argv[3], 'rb') as f:
+        cfg = tomllib.load(f)
 ops = cfg.get('ops', {})
 scenarios = {n: s for n, s in m.get("scenarios", {}).items() if isinstance(s, dict)}
 # The same selection as the runner (runner/src/bin/run-matrix.rs): any scenario
@@ -231,6 +203,16 @@ scenarios = {n: s for n, s in m.get("scenarios", {}).items() if isinstance(s, di
 selected = [n for n in scenarios if not pat or pat in n]
 if pat and not selected:
     selected = [n for n in cfg.get('groups', {}).get(pat, []) if n in scenarios]
+if sys.argv[4] == "list":
+    for name in sorted(set(selected)):
+        s = scenarios[name]
+        has_recipe = "recipe" in s and s["recipe"]
+        mark = " " if has_recipe else "*"
+        status = s.get("status", "")
+        print(f"  [{mark}] {name:<55} {status}")
+    print()
+    print("(* = no recipe — scenario is a marker / blocked / pre-v2 stub)")
+    sys.exit(0)
 needs_vm = False
 for name in selected:
     s = scenarios[name]
@@ -248,7 +230,24 @@ for name in selected:
     if needs_vm: break
 print("1" if needs_vm else "0")
 PYEOF
-)
+}
+
+# ── --list: offline; just walk test-matrix.json ─────────────────
+if [[ "${DO_LIST}" == "1" ]]; then
+    if [[ ! -f "${matrix_full}" ]]; then
+        echo "[run-tests] matrix not found: ${matrix_full}" >&2
+        exit 2
+    fi
+    matrix_selection list
+    exit 0
+fi
+
+# ── detect: do any matched scenarios need the VM? ───────────────
+# Only run the SSH preflight + bootstrap for scenarios that actually
+# need the VM. Pure host-side recipes don't.
+NEEDS_VM=0
+if [[ -f "${matrix_full}" ]]; then
+    NEEDS_VM=$(matrix_selection needs-vm)
 fi
 
 # ── bootstrap: ensure .test-env exists + populated (only if VM needed) ──
