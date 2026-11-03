@@ -1366,5 +1366,60 @@ class SharedBaseVM(unittest.TestCase):
         self.assert_base_unchanged()
 
 
+class SharedBaseLiveCheck(unittest.TestCase):
+    """The live proof reads a run's result where the harness writes it."""
+
+    def setUp(self):
+        live_spec = importlib.util.spec_from_file_location(
+            "shared_base_live", Path(__file__).with_name("shared-base-live.py")
+        )
+        self.live = importlib.util.module_from_spec(live_spec)
+        live_spec.loader.exec_module(self.live)
+        self.temp = tempfile.TemporaryDirectory(prefix="fswth-live-check-")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+
+    def runs(self, results):
+        """Runs the proof's real check over a harness stand-in writing `results`."""
+
+        class Harness:
+            def __init__(self, command, env, stdout, stderr):
+                # As run-matrix does: results.json is written, the matrix is not.
+                if results is not None:
+                    matrix = Path(env["CONSUMER_ROOT"]) / "test-diagnostics/matrix"
+                    matrix.mkdir(parents=True)
+                    (matrix / "results.json").write_text(json.dumps(results))
+
+            def wait(self, timeout=None):
+                return 0
+
+            def poll(self):
+                return 0
+
+        answer = MagicMock(stdout=json.dumps({
+            "start_utc": "2026-11-03T11:00:00+00:00",
+            "end_utc": "2026-11-03T11:00:10+00:00",
+        }).encode())
+        with (
+            patch.object(self.live.subprocess, "Popen", Harness),
+            patch.object(self.live.vm, "run"),
+            patch.object(self.live.vm, "ssh", return_value=answer),
+        ):
+            return self.live.concurrent_runs(self.root / "state", self.root, "C:/fswth/proof")
+
+    def test_a_run_the_harness_passed_counts_though_the_matrix_stays_pending(self):
+        records = self.runs([{"name": "shared-vm-probe", "status": "passed"}])
+        self.assertEqual(len(records), 3)
+        self.assertEqual({record["overlap_seconds"] for record in records}, {10.0})
+
+    def test_a_run_the_harness_failed_stops_the_proof(self):
+        with self.assertRaisesRegex(AssertionError, "did not report passed"):
+            self.runs([{"name": "shared-vm-probe", "status": "failed"}])
+
+    def test_a_run_that_reported_nothing_stops_the_proof(self):
+        with self.assertRaisesRegex(AssertionError, "did not report passed"):
+            self.runs(None)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
