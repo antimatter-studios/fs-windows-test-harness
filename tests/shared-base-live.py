@@ -112,7 +112,7 @@ def stop_all(runs):
 
 
 def guest_result(state, workdir):
-    result = vm.ssh(state, f"Get-Content -Raw '{workdir}/result.json'", capture_output=True, timeout=60)
+    result = vm.ssh(state, f"if (Test-Path -LiteralPath '{workdir}/result.json') {{ Get-Content -Raw -LiteralPath '{workdir}/result.json' }} else {{ 'null' }}", capture_output=True, timeout=60)
     return json.loads(result.stdout)
 
 
@@ -168,8 +168,16 @@ def guest_probe(state, drive, workdir):
     return json.loads(vm.ssh(state, command, capture_output=True, timeout=60).stdout)
 
 
+def guest_marker(state, workdir):
+    command = f"Test-Path -LiteralPath '{workdir}/ready'"
+    return vm.ssh(state, command, capture_output=True, timeout=60).stdout.decode().strip() == "True"
+
+
 def failure_isolation(state, root, remote):
     """One run of a pair fails, or dies abruptly, with both mounted."""
+    # The runs wait for each other to mount, so a run that dies before mounting
+    # fails its peer's wait: that is this script's rendezvous, and it is reported
+    # as no mount rather than as a collision.
     records = []
     for mode in ("fail", "crash"):
         for round_number in (1, 2):
@@ -186,9 +194,12 @@ def failure_isolation(state, root, remote):
                     "surviving_exit": exits[1], "surviving_status": harness_status(surviving[1]),
                     "surviving_result": guest_result(state, surviving[2]),
                     "after": guest_probe(state, "X", failing[2]),
+                    "failing_reached_guest": guest_marker(state, failing[2]),
                 }
                 if record["failing_status"] == "passed":
                     raise AssertionError(f"The failing run reported passed: {record}")
+                if not record["failing_reached_guest"]:
+                    raise RuntimeError(f"The failing run never mounted, so this round shows nothing: {record}")
                 if record["surviving_status"] != "passed" or exits[1] != 0:
                     raise AssertionError(f"One run's failure failed the other: {record}")
                 if mode == "crash" and record["after"]["memfs_alive"]:
@@ -220,6 +231,8 @@ def main():
     parser.add_argument("--state-root", type=Path, required=True)
     parser.add_argument("--count", type=int, choices=(1, 2), default=2)
     parser.add_argument("--first-port", type=int, default=22364)
+    parser.add_argument("--failures-only", action="store_true",
+                        help="skip the mount and overlap rounds; run only the failing pairs")
     parser.add_argument("--memory-mib", type=int, help="default: the base's")
     parser.add_argument("--cpus", type=int, help="default: the base's")
     args = parser.parse_args()
@@ -276,9 +289,12 @@ def main():
         remote = f"C:/fswth/shared-base-{nonce}"
         vm.ssh(first, f"New-Item -ItemType Directory '{remote}' -Force | Out-Null", capture_output=True, timeout=60)
         vm.run([first / "bin/scp", Path(__file__).with_name("shared-vm-collisions.ps1"), f"fswth-local:{remote}/collisions.ps1"], capture_output=True, timeout=60)
-        result = vm.ssh(first, f"& '{remote}/collisions.ps1' -Root '{remote}/runs'; if (-not $?) {{ exit 1 }}", capture_output=True, timeout=600)
-        report["same_vm_mounts"] = json.loads(result.stdout)
-        report["concurrent_harness_runs"] = concurrent_runs(first, root, remote)
+        if args.failures_only:
+            vm.run([first / "bin/scp", Path(__file__).with_name("shared-vm-run.ps1"), f"fswth-local:{remote}/run.ps1"], capture_output=True, timeout=60)
+        else:
+            result = vm.ssh(first, f"& '{remote}/collisions.ps1' -Root '{remote}/runs'; if (-not $?) {{ exit 1 }}", capture_output=True, timeout=600)
+            report["same_vm_mounts"] = json.loads(result.stdout)
+            report["concurrent_harness_runs"] = concurrent_runs(first, root, remote)
         report["failure_isolation"] = failure_isolation(first, root, remote)
         report["memory_after_tests"] = memory()
         report["tests_passed"] = True

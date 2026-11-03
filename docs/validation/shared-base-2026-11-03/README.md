@@ -1,12 +1,15 @@
-# Shared Windows base disk: partial local validation, 2026-11-03
+# Shared Windows base disk: local validation, 2026-11-03
 
 ## Status
 
-**Two simultaneous Windows guests have not been run. One real Windows
-shared-base guest has been run and stopped.** This is partial evidence for
-#64, not completion of its acceptance criteria. The remaining check needs a
-dedicated window with two free VM slots; no unrelated VM was stopped and a
-third VM was never started.
+**Two simultaneous Windows guests ran from one base, and two test runs ran at
+once in one guest; both are measured here.** The simultaneous guests are
+recorded on
+[#64](https://github.com/antimatter-studios/fs-windows-test-harness/issues/64#issuecomment-6602521544):
+both booted and shut down cleanly, and the base's disk, UEFI files, `ssh-key`
+and `vm.json` kept the same SHA-256. The sections down to "Same-guest sharing"
+are the earlier single-guest run. The rule that follows from all of it is in
+[docs/qemu-vm.md](../../qemu-vm.md#one-guest-several-test-runs).
 
 The existing `~/.local/share/fs-windows-test-harness/arm64` installation was
 used as the original base. It was not rebuilt, flattened, copied, or modified.
@@ -94,24 +97,62 @@ separate `local-vm.py exec` calls against the same state are refused by its
 operation lock; the experiment intentionally starts both harness commands
 inside one explicit proof operation.
 
-## Remaining check
+## Same-guest measurement
 
-When there are no other running QEMU VMs on this MacBook, run the following
-from the finished branch with an existing Rust toolchain that supports the
-runner's Cargo lockfile. A fresh scratch directory is required. Do not run
-`prepare`, `provision`, or `down --save` on the original installation.
+Run on one guest at 4096 MiB and 2 CPUs, beside another worker's Linux VM: each
+proof run recorded one, and the rust-fs-ntfs pair started only with a free VM
+slot. The raw results are in [same-guest.json](same-guest.json). No software
+was installed on the host or the base. The base's hashes matched before and
+after each proof run.
 
-```sh
-pgrep -fl 'qemu-system-' | grep /opt/homebrew/bin/qemu
-RUSTUP_TOOLCHAIN=1.95.0 python3 -u -B tests/shared-base-live.py \
-  --base "$HOME/.local/share/fs-windows-test-harness/arm64" \
-  --state-root "$HOME/tmp/constellation-loop/win-64/pair-final"
-```
+**Why the proof stopped in #64.** `tests/shared-base-live.py` read each run's
+status from `test-matrix.json`. The harness never writes that file: the runner
+writes `test-diagnostics/matrix/results.json`. Both runs had passed, so the
+check was wrong and the runs were not. It now reads `results.json`.
 
-The script refuses to exceed two host VMs, boots two Windows instances from
-the same original disk, verifies read-only backing nodes and disjoint guest
-writes, measures each boot and overlay plus free memory, runs the strengthened
-same-guest experiments, stops both guests in `finally`, and compares all base
-hashes. Read `pair-final/measurement.json` and the consumer run logs. Only
-after that succeeds should #64 be closed with `Fixes #64`. Until then the
-pull request is `Part of #64`.
+**Do two runs overlap?** Yes. Three pairs of `run-tests.sh` runs with the WinFsp
+probe overlapped for 0.72, 0.40 and 0.43 seconds of guest time, and each
+verified 100 files on its own drive letter. The probe is short, so a real
+matrix was also run: rust-fs-ntfs at `ae8283d6`, filter `repeat-mount` (three
+scenarios, `max_parallel = 4`), from two checkouts into `C:/fswth/pair-a` and
+`C:/fswth/pair-b`, with a private `HARNESS_DIR` each.
+
+| Run | Wall | Result |
+| --- | ---: | --- |
+| One matrix alone | 117.6 s | 3 of 3 passed |
+| Two at once, first to finish | 155.6 s | 3 of 3 passed |
+| Two at once, second to finish | 317.0 s | 3 of 3 passed |
+
+Scenario windows overlapped for 132 seconds. No disk image stayed attached
+afterwards. The pair took longer than two runs one after the other (235.2 s),
+measured once. Of the 317.0 s, 218 s is a single `win-chkdsk` step in one
+scenario. A step of that size also appears with one matrix alone, in the
+[2026-10-10 run](../qemu-ntfs-macos-2026-10-10/results.json) (216.9 s), so this
+stall is not shown to come from sharing. The other scenarios still took about
+1.4 times as long as alone.
+
+**Do they collide?** Only on a shared letter or directory. Across three rounds,
+all 6 pairs on disjoint letters or directories kept their own contents. Each
+of 6 second mounts onto a letter or directory already in use exited nonzero
+(183 for a drive letter, 5 for a directory), and the first run's process and
+contents were unaffected. In the rust-fs-ntfs pair, all 6 scenarios passed on
+the letters Windows assigned.
+
+**What happens to the other run when one fails?** It passes.
+
+| The failing run | Pairs | Failing run | Other run | Failing run's drive afterwards |
+| --- | ---: | --- | --- | --- |
+| Throws, with both mounted | 2 | `failed` | `passed`, 100 files verified | free |
+| PowerShell ended by `Stop-Process`, with both mounted | 2 | `failed` | `passed`, 100 files verified | free |
+
+In the abrupt case no `finally` ran, and memfs did not hold the letter when it
+was checked afterwards.
+
+One earlier attempt at the abrupt case shows nothing about sharing, and is left
+out of the table. Its harness process on the host ended with `Killed: 9` before
+reaching the guest, for a reason not established. Its peer then failed waiting
+for it, because the probe's two runs wait for each other to mount. The proof
+now reports a run that never mounted as no result rather than as a collision.
+
+**Not measured:** a guest crash or reboot during a pair, disk exhaustion by one
+run, a pair at other sizes, or a repeat of the rust-fs-ntfs pair.
