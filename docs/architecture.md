@@ -51,7 +51,7 @@ thread pool to match. A scenario that names an `exclusive_group` takes that
 group's slot before a global one, so scenarios sharing a scarce resource
 run one at a time without holding global slots while they wait. Drive
 letters do not guarantee memory: choose a value the guest can hold (the
-QEMU guest has 4 GiB). Separate guests are independent.
+QEMU guest's memory is in `docs/qemu-vm.md`). Separate guests are independent.
 
 ## Lifecycle: state machine for one scenario
 

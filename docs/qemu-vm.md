@@ -59,8 +59,10 @@ installed guest's firmware.
 
 Resources: 2 virtual CPUs, 4 GiB RAM, about 6 GiB of cached media and a sparse
 128 GiB guest disk, on every host. Large matrices also need room for host
-images. Run one matrix at a time and choose consumer concurrency to fit the
-guest memory; multiple drive letters do not guarantee capacity.
+images. Run one matrix at a time unless
+[its conditions for sharing a guest](#one-guest-several-test-runs) hold, and
+choose consumer concurrency to fit the guest memory; multiple drive letters do
+not guarantee capacity.
 
 ## Windows evaluation terms
 
@@ -335,18 +337,45 @@ base. A borrowed base cannot itself be another instance.
 
 ### One guest, several test runs
 
-Distinct `C:/fswth/<name>` workdirs give independent matrix-run leases; the
-lease is not VM-wide. They do **not** namespace drive letters or a deliberately
-shared directory mountpoint. Give concurrent runs disjoint drive letters,
-mount directories, images, diagnostics and staging destinations. If shipping
-harness scripts, set a private `HARNESS_DIR` for each workdir rather than
-letting both resolve to the default shared sibling directory. Neither
-`max_parallel = "drive-letters"` (a count, not a reservation) nor
-`exclusive_group` (local to one runner process) allocates resources between
-independent runs. Use separate VM instances when consumers cannot guarantee
-those disjoint resources. `local-vm.py exec` also holds its instance's
-operation lock for the complete command, so two separate `exec` invocations
-on the same state intentionally serialize by refusing the second one.
+Measured on 2026-11-03 at 4096 MiB and 2 CPUs
+([the results](validation/shared-base-2026-11-03/README.md#same-guest-measurement)).
+Two matrices can run at once in one guest. In the one pair of real matrices
+measured, they took longer than one after the other, so a second instance is
+the better choice when a VM slot is free.
+
+**One guest may be shared** when all of these hold:
+
+- Each run has its own `C:/fswth/<name>` workdir and its own `HARNESS_DIR`. The
+  default `HARNESS_DIR` resolves to one shared sibling directory.
+- Each run uses drive letters and mount directories no other run uses, or lets
+  Windows assign them, as a VHD attach does.
+- Each run has its own images, diagnostics and staging destinations.
+- The runs are started with the instance's `bin` first on `PATH`, because
+  `local-vm.py exec` holds the instance's operation lock for the whole command
+  and refuses a second one.
+- A slower run is acceptable, and the guest has the memory for both.
+
+**Use a separate instance** when any of those cannot be guaranteed, when a run
+reboots or may crash Windows, or when a run's timing matters. Nothing allocates
+these between independent runs: workdir leases are per workdir,
+`max_parallel = "drive-letters"` counts free letters without reserving them,
+and `exclusive_group` is local to one runner process.
+
+What was measured:
+
+- **Overlap:** three pairs of real `run-tests.sh` runs and one pair of real
+  rust-fs-ntfs matrices overlapped in the guest. All passed.
+- **Collisions:** a second mount of the same drive letter exits 183, and of the
+  same directory exits 5, in 6 of 6 tries each. The first run's contents are
+  unchanged and it stays mounted. The second run fails, so a collision costs
+  that run, not the other one.
+- **One run failing:** in 4 of 4 pairs, 2 by a thrown error and 2 by ending the
+  run's PowerShell abruptly, the other run verified its 100 files and passed.
+  The failed run's drive letter was free afterwards.
+- **Not measured:** a guest crash or reboot during a pair. Both runs share one
+  kernel, so neither should expect to survive it. rust-fs-ntfs recorded that
+  case on 2026-09-18: Windows stopped responding under 24 concurrent scenarios,
+  and all 10 in flight failed.
 
 The opt-in real-Windows proof requires existing QEMU, WinFsp in a provisioned
 base, an installed Rust toolchain for the real harness runs, and two free VM
@@ -362,8 +391,11 @@ read-only backing nodes, writes distinct contents to the same guest path and
 checks isolation, records boot time, per-file allocated disk bytes and raw
 `vm_stat`, then stops both guests in `finally`. It also runs three pairs of
 real `run-tests.sh` invocations on one guest with independent workdirs and
-X:/Y: mounts, plus repeated WinFsp drive-letter and directory-mount collision
-probes. The resulting `measurement.json` is outside the checkout. `--count 1`
+X:/Y: mounts, repeated WinFsp drive-letter and directory-mount collision
+probes, and pairs where one run fails or dies abruptly. `--failures-only` runs
+just those pairs. The resulting `measurement.json` is outside the checkout.
+`tests/shared-guest-consumers-live.py` runs two real consumer matrices in one
+guest, after the first alone for comparison. `--count 1`
 permits the same-guest experiments alongside one existing Linux VM, but does
 not establish the two-Windows-VM acceptance criterion. The VM-free tests in
 `chore local-vm` remain the CI regression tier. A separate opt-in image oracle
@@ -377,8 +409,7 @@ python3 -B tests/shared-base-image.py \
 ```
 
 The [2026-11-03 measurements](validation/shared-base-2026-11-03/README.md)
-distinguish the checks actually run from the remaining simultaneous-guest
-acceptance check.
+record both the simultaneous guests and the same-guest results.
 
 ## Acceptance
 
