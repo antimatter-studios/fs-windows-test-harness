@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory = $true)] [string]$Root,
     [Parameter(Mandatory = $true)] [string]$Peer,
-    [Parameter(Mandatory = $true)] [string]$Drive
+    [Parameter(Mandatory = $true)] [string]$Drive,
+    [ValidateSet('pass', 'fail', 'crash')] [string]$Mode = 'pass'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -33,6 +34,13 @@ try {
     }
     Set-Content -LiteralPath "$Root\written" -Value complete
     Wait-For "$Peer\written"
+    if ($Mode -eq 'fail') { throw 'This run was told to fail with both runs mounted' }
+    if ($Mode -eq 'crash') {
+        # Ends this process at once: no finally, so memfs is left to whatever
+        # the guest does with an orphan.
+        Set-Content -LiteralPath "$Root\memfs.pid" -Value $process.Id
+        Stop-Process -Id $PID -Force
+    }
     foreach ($index in 1..100) {
         if ((Get-Content -LiteralPath "${Drive}:\file-$index.txt") -ne "$Root-$index") {
             throw "Another run changed ${Drive}:\file-$index.txt"
