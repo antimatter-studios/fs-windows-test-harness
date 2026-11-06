@@ -58,7 +58,8 @@ copied into the state directory, so a later QEMU upgrade does not change an
 installed guest's firmware.
 
 Resources: 2 virtual CPUs, 4 GiB RAM, about 6 GiB of cached media and a sparse
-128 GiB guest disk, on every host. Large matrices also need room for host
+128 GiB guest disk, on every host. [Partial measurements](validation/vm-size-2026-11-03/README.md)
+have not yet shown a smaller size that keeps a run's speed. Large matrices also need room for host
 images. Run one matrix at a time unless
 [its conditions for sharing a guest](#one-guest-several-test-runs) hold, and
 choose consumer concurrency to fit the guest memory; multiple drive letters do
