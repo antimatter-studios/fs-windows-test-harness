@@ -11,7 +11,9 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -1437,6 +1439,69 @@ class SharedRunRegistry(unittest.TestCase):
         registry = json.loads((self.state / vm.RUN_REGISTRY).read_text())
         self.assertEqual(registry["runs"], [])
         self.assertFalse(registry["shutdown_requested"])
+
+    def test_killing_one_checkout_run_leaves_the_other_registered(self):
+        worker = r'''import importlib.util, pathlib, sys
+spec = importlib.util.spec_from_file_location("local_vm", sys.argv[1])
+vm = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(vm)
+state, ready = pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3])
+run_id = vm.register_run(state)
+ready.write_text(str(pathlib.Path.cwd()))
+sys.stdin.readline()
+print("SHUTDOWN" if vm.deregister_run(state, run_id) else "KEPT_RUNNING", flush=True)
+'''
+        checkouts = [self.state / "checkout-one", self.state / "checkout-two"]
+        workers = []
+        try:
+            for index, checkout in enumerate(checkouts):
+                checkout.mkdir()
+                # Each consumer keeps its image and workdir under its own checkout.
+                (checkout / "image.vhdx").write_bytes(f"disk-{index}".encode())
+                ready = self.state / f"ready-{index}"
+                process = subprocess.Popen(
+                    [
+                        sys.executable,
+                        "-c",
+                        worker,
+                        str(Path(__file__).resolve().parents[1] / "scripts/local-vm.py"),
+                        str(self.state),
+                        str(ready),
+                    ],
+                    cwd=checkout,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    text=True,
+                )
+                workers.append((process, ready, checkout))
+
+            deadline = time.monotonic() + 5
+            while not all(ready.exists() for _, ready, _ in workers):
+                if time.monotonic() >= deadline:
+                    self.fail("checkout runs did not register")
+                time.sleep(0.01)
+
+            self.assertEqual(
+                {ready.read_text() for _, ready, _ in workers},
+                {str(checkout.resolve()) for _, _, checkout in workers},
+            )
+            self.assertFalse(vm.request_shutdown(self.state))
+            workers[0][0].kill()
+            workers[0][0].wait(timeout=5)
+            self.assertIsNone(workers[1][0].poll())
+
+            workers[1][0].stdin.write("finish\n")
+            workers[1][0].stdin.flush()
+            self.assertEqual(workers[1][0].stdout.readline().strip(), "SHUTDOWN")
+            workers[1][0].wait(timeout=5)
+            registry = json.loads((self.state / vm.RUN_REGISTRY).read_text())
+            self.assertEqual(registry["runs"], [])
+            self.assertFalse(registry["shutdown_requested"])
+        finally:
+            for process, _, _ in workers:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=5)
 
 
 if __name__ == "__main__":
