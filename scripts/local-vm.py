@@ -61,6 +61,7 @@ SYSTEM_FIRMWARE = (
 # guest reached 45.4 GiB while Windows used 13.8 GB (macOS, 2026-10-11).
 BASE_DISK, BASE_VARS = "windows.qcow2", "uefi-vars.fd"
 RUN_DISK, RUN_VARS = "run.qcow2", "run-vars.fd"
+RUN_REGISTRY = "active-runs.json"
 
 # Optional virtio-fs share (`up --share`). The guest's VirtioFsSvc mounts the
 # device with this tag at Z:. Debian installs virtiofsd outside PATH.
@@ -114,6 +115,59 @@ def exclusive(state):
                 "Another lifecycle operation or test run owns this VM"
             ) from exc
         yield
+
+
+def _owner_alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def _update_runs(state, update):
+    private_dir(state)
+    lock_path = state / "active-runs.lock"
+    with lock_path.open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        path = state / RUN_REGISTRY
+        registry = json.loads(path.read_text()) if path.exists() else {
+            "runs": [], "shutdown_requested": False
+        }
+        registry["runs"] = [run for run in registry["runs"] if _owner_alive(run["pid"])]
+        result = update(registry)
+        write_json(path, registry)
+        return result
+
+
+def register_run(state, pid=None):
+    run_id = secrets.token_hex(16)
+    _update_runs(state, lambda registry: registry["runs"].append(
+        {"id": run_id, "pid": pid or os.getpid()}
+    ))
+    return run_id
+
+
+def deregister_run(state, run_id):
+    def remove(registry):
+        registry["runs"] = [run for run in registry["runs"] if run["id"] != run_id]
+        shutdown = registry["shutdown_requested"] and not registry["runs"]
+        if shutdown:
+            registry["shutdown_requested"] = False
+        return shutdown
+    return _update_runs(state, remove)
+
+
+def request_shutdown(state):
+    def request(registry):
+        registry["shutdown_requested"] = True
+        if not registry["runs"]:
+            registry["shutdown_requested"] = False
+            return True
+        return False
+    return _update_runs(state, request)
 
 
 def qmp(state, command, arguments=None):
@@ -1099,6 +1153,28 @@ def main(argv=None):
             )
         )
         return 0
+    if args.action == "exec":
+        command = args.command[1:] if args.command[:1] == ["--"] else args.command
+        if not command:
+            raise RuntimeError("exec needs a command after --")
+        config = load_config(state)
+        if not config["provisioned"] or running(state) is None:
+            raise RuntimeError("VM must be running and provisioned before exec")
+        run_id = register_run(state)
+        with keep_awake("exec"):
+            try:
+                env = dict(
+                    os.environ,
+                    PATH=str(state / "bin") + os.pathsep + os.environ["PATH"],
+                )
+                return subprocess.call(command, env=env)
+            finally:
+                if deregister_run(state, run_id):
+                    with exclusive(state):
+                        down(state, 180, config)
+    if args.action == "down" and not request_shutdown(state):
+        print("Shutdown deferred until registered runs finish")
+        return 0
     with exclusive(state), keep_awake(args.action):
         if args.action == "prepare":
             prepare(state, args)
@@ -1131,21 +1207,12 @@ def main(argv=None):
             )
         elif args.action == "key":
             qmp(state, "send-key", {"keys": [{"type": "qcode", "data": args.qcode}]})
-        elif args.action in ("exec", "ssh"):
+        elif args.action == "ssh":
             command = args.command[1:] if args.command[:1] == ["--"] else args.command
             if not command:
                 raise RuntimeError(f"{args.action} needs a command after --")
             if args.action == "ssh":
                 ssh(state, " ".join(command), timeout=300)
-            else:
-                if not config["provisioned"] or running(state) is None:
-                    raise RuntimeError("VM must be running and provisioned before exec")
-                env = dict(
-                    os.environ,
-                    PATH=str(state / "bin") + os.pathsep + os.environ["PATH"],
-                )
-                # Keep the lock in this parent until the complete command exits.
-                return subprocess.call(command, env=env)
     return 0
 
 
