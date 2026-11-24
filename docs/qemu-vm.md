@@ -344,6 +344,14 @@ Two matrices can run at once in one guest. In the one pair of real matrices
 measured, they took longer than one after the other, so a second instance is
 the better choice when a VM slot is free.
 
+`local-vm.py exec` registers its process in the shared state directory before
+starting a consumer command and deregisters it when that command exits. These
+registrations are shared by every checkout using the same `--state`. A killed
+owner is removed on the next registry update. If `down` is requested while
+another consumer is registered, shutdown waits until the last live command
+exits; its exit then completes the pending shutdown. Runs may therefore share
+one guest without one checkout shutting it down beneath another.
+
 **One guest may be shared** when all of these hold:
 
 - Each run has its own `C:/fswth/<name>` workdir and its own `HARNESS_DIR`. The

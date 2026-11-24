@@ -1421,5 +1421,23 @@ class SharedBaseLiveCheck(unittest.TestCase):
             self.runs(None)
 
 
+class SharedRunRegistry(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="fswth-registry-")
+        self.addCleanup(self.temp.cleanup)
+        self.state = Path(self.temp.name)
+
+    def test_shutdown_waits_for_all_live_runs_and_prunes_dead_owners(self):
+        first = vm.register_run(self.state, pid=os.getpid())
+        dead = vm.register_run(self.state, pid=99999999)
+        second = vm.register_run(self.state, pid=os.getpid())
+        self.assertFalse(vm.request_shutdown(self.state))
+        self.assertFalse(vm.deregister_run(self.state, first))
+        self.assertTrue(vm.deregister_run(self.state, second))
+        registry = json.loads((self.state / vm.RUN_REGISTRY).read_text())
+        self.assertEqual(registry["runs"], [])
+        self.assertFalse(registry["shutdown_requested"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
